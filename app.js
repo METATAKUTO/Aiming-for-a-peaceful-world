@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - Firebase リアルタイム同期＆動画対応版
+// 平和 (Peaceful Board) - Firebase リアルタイム同期＆動画制限版
 // ==========================================
 
 // Firebase 初期化
@@ -629,61 +629,7 @@ window.translateTweet = async function(tweetId) {
   renderTweets();
 }
 
-// --- 動画を1分以内に自動トリミングする関数 ---
-async function processVideoFile(file) {
-  return new Promise((resolve) => {
-    const video = document.createElement('video');
-    video.preload = 'metadata';
-    video.src = URL.createObjectURL(file);
-
-    video.onloadedmetadata = function() {
-      window.URL.revokeObjectURL(video.src);
-      
-      if (video.duration <= 60) {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result);
-        reader.readAsDataURL(file);
-        return;
-      }
-
-      alert(`⚠️ 選択された動画が1分（${Math.floor(video.duration)}秒）を超えているため、最初の1分間に自動トリミングします！`);
-
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 360;
-      const ctx = canvas.getContext('2d');
-
-      const stream = canvas.captureStream(30);
-      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-      const chunks = [];
-
-      recorder.ondataavailable = (e) => chunks.push(e.data);
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'video/webm' });
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result);
-        reader.readAsDataURL(blob);
-      };
-
-      video.currentTime = 0;
-      video.muted = true;
-      video.play();
-      recorder.start();
-
-      const drawTimer = setInterval(() => {
-        if (video.currentTime >= 60 || video.ended) {
-          video.pause();
-          recorder.stop();
-          clearInterval(drawTimer);
-        } else {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        }
-      }, 1000 / 30);
-    };
-  });
-}
-
-// --- メディア（画像・動画）選択時の処理 ---
+// --- メディア（画像・動画）選択時の処理（1分超えの動画を拒否） ---
 const mediaInput = document.getElementById('mediaInput') || document.getElementById('imageInput');
 const imagePreviewContainer = document.getElementById('imagePreviewContainer');
 const previewWrapper = document.getElementById('previewWrapper');
@@ -695,12 +641,29 @@ if (mediaInput) {
     if (!file) return;
 
     if (file.type.startsWith('video/')) {
-      alert('動画を読み込んでいます。少々お待ちください...');
-      currentMediaBase64 = await processVideoFile(file);
-      if (previewWrapper) {
-        previewWrapper.innerHTML = `<video src="${currentMediaBase64}" controls style="width: 100%; max-height: 200px; border-radius: 8px;"></video>`;
-      }
-      if (imagePreviewContainer) imagePreviewContainer.style.display = 'block';
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.src = URL.createObjectURL(file);
+
+      video.onloadedmetadata = function() {
+        window.URL.revokeObjectURL(video.src);
+        
+        if (video.duration > 60) {
+          alert(`⚠️ 選択された動画は ${Math.floor(video.duration)}秒 です。\n動画は「1分以内」のものしかアップロードできません。`);
+          mediaInput.value = '';
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          currentMediaBase64 = event.target.result;
+          if (previewWrapper) {
+            previewWrapper.innerHTML = `<video src="${currentMediaBase64}" controls style="width: 100%; max-height: 200px; border-radius: 8px;"></video>`;
+          }
+          if (imagePreviewContainer) imagePreviewContainer.style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+      };
     } else if (file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onload = (event) => {
@@ -788,7 +751,6 @@ function renderTweets() {
       ? `<button onclick="blockUser('${escapeHtml(tweet.name)}')" style="background:none; border:none; color:var(--text-secondary); font-size:0.75rem; cursor:pointer;" title="ブロック">🚫</button>` 
       : '';
 
-    // メディア（画像か動画かを自動判別）
     let mediaHtml = '';
     if (tweet.imageUrl) {
       const isVideo = tweet.imageUrl.startsWith('data:video/') || tweet.imageUrl.includes('.webm') || tweet.imageUrl.includes('.mp4');
@@ -978,7 +940,7 @@ if (tweetForm) {
       lang: userProfile.lang,
       flag: userProfile.flag,
       time: timeStr,
-      imageUrl: currentMediaBase64, // 画像または動画データ
+      imageUrl: currentMediaBase64,
       likes: 0,
       isLiked: false,
       reactions: { thanks: 0, peace: 0, celebrate: 0, healing: 0 },
