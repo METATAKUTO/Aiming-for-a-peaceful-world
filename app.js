@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - メニュー開閉・フレンド申請同期対応版
+// 平和 (Peaceful Board) - フレンド申請キャンセル対応版
 // ==========================================
 
 // Firebase 初期化
@@ -13,7 +13,9 @@ const firebaseConfig = {
   measurementId: "G-MEFWT72T5R"
 };
 
-firebase.initializeApp(firebaseConfig);
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
 const db = firebase.firestore();
 
 // --- 端末固有のデバイスID ---
@@ -42,7 +44,7 @@ let tweets = [];
 let registeredUsers = {};
 let searchQuery = '';
 let currentFilterMode = 'all';
-let notifications = [];
+let notifications = JSON.parse(localStorage.getItem('peace_notifications')) || [];
 let currentChatFriend = null;
 let currentMediaBase64 = '';
 
@@ -70,6 +72,7 @@ function saveLocalSettings() {
   localStorage.setItem('peace_blocked', JSON.stringify(blockedUsers));
   localStorage.setItem('peace_bookmarks', JSON.stringify(bookmarks));
   localStorage.setItem('peace_dms', JSON.stringify(dms));
+  localStorage.setItem('peace_notifications', JSON.stringify(notifications));
   if (userProfile.name) {
     localStorage.setItem('peace_username', userProfile.name);
   }
@@ -84,7 +87,7 @@ function initRealtimeSync() {
     });
     renderTweets();
   }, (error) => {
-    console.error("Firestoreツイート同期エラー: ", error);
+    console.warn("Firestoreツイート同期警告: ", error);
   });
 
   db.collection('users').onSnapshot((snapshot) => {
@@ -92,20 +95,36 @@ function initRealtimeSync() {
     snapshot.forEach((doc) => {
       registeredUsers[doc.id] = doc.data().deviceId;
     });
+  }, (error) => {
+    console.warn("Firestoreユーザー同期警告: ", error);
   });
 
   if (userProfile.name) {
-    db.collection('friendRequests').where('to', '==', userProfile.name).onSnapshot((snapshot) => {
-      pendingRequestsIn = [];
-      snapshot.forEach((doc) => {
-        pendingRequestsIn.push(doc.data());
+    try {
+      db.collection('friendRequests').where('to', '==', userProfile.name).onSnapshot((snapshot) => {
+        pendingRequestsIn = [];
+        snapshot.forEach((doc) => {
+          pendingRequestsIn.push(doc.data());
+        });
+        saveLocalSettings();
+        updateNotificationBadge();
+      }, (err) => {
+        console.warn("フレンド申請同期警告:", err);
       });
-      saveLocalSettings();
-      if (pendingRequestsIn.length > 0) {
-        notifBadge.style.display = 'inline-block';
-        notifBadge.textContent = pendingRequestsIn.length;
-      }
-    });
+    } catch (e) {
+      console.warn("フレンド申請リスナーエラー:", e);
+    }
+  }
+}
+
+function updateNotificationBadge() {
+  const totalCount = notifications.length + pendingRequestsIn.length;
+  if (totalCount > 0) {
+    notifBadge.style.display = 'inline-block';
+    notifBadge.textContent = totalCount;
+  } else {
+    notifBadge.style.display = 'none';
+    notifBadge.textContent = '0';
   }
 }
 
@@ -141,6 +160,7 @@ function checkInitialSetup() {
       } else {
         updateProfileUI();
         initRealtimeSync();
+        updateNotificationBadge();
       }
     });
   }
@@ -205,7 +225,7 @@ function playNotificationSound() {
   }
 }
 
-// --- メニュー構成の注入（ブランド注意書きと各機能ボタン） ---
+// --- メニュー構成の注入 ---
 function injectBrandNotice() {
   const brandLogo = document.querySelector('.brand-logo');
   if (brandLogo && !document.getElementById('brandNotice')) {
@@ -243,7 +263,6 @@ function injectBrandNotice() {
   }
 }
 
-// --- スマホ用スライドメニューの開閉関数 ---
 window.toggleSideMenu = function() {
   const sidebar = document.getElementById('sidebarLeft');
   const backdrop = document.getElementById('menuBackdrop');
@@ -259,7 +278,6 @@ window.toggleSideMenu = function() {
   }
 }
 
-// --- 利用規約モーダル ---
 window.openTermsModal = function() {
   let termsModal = document.getElementById('termsModal');
   if (!termsModal) {
@@ -315,8 +333,9 @@ window.openProfileModal = function() {
 window.openNotificationsModal = function() {
   notificationsModal.style.display = 'flex';
   renderNotifications();
-  notifBadge.style.display = 'none';
-  notifBadge.textContent = '0';
+  notifications = [];
+  saveLocalSettings();
+  updateNotificationBadge();
 }
 
 window.closeModal = function(id) {
@@ -447,6 +466,24 @@ window.requestFriend = async function(userName) {
   }
 }
 
+// --- フレンド申請のキャンセル（取り消し）機能 ---
+window.cancelFriendRequest = async function(userName) {
+  if (!confirm(`${userName} さんへのフレンド申請を取り消しますか？`)) return;
+
+  try {
+    const requestId = userProfile.name + '_' + userName;
+    await db.collection('friendRequests').doc(requestId).delete();
+
+    pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
+    saveLocalSettings();
+    alert(`${userName} さんへのフレンド申請を取り消しました。`);
+    renderTweets();
+  } catch (err) {
+    console.error("申請キャンセルエラー:", err);
+    alert("申請の取り消しに失敗しました。");
+  }
+}
+
 window.acceptFriend = async function(userName) {
   if (!friends.includes(userName)) {
     friends.push(userName);
@@ -523,6 +560,17 @@ window.openDmListModal = function() {
                 <button onclick="acceptFriend('${escapeHtml(r.from)}')" style="background: #00b900; border:none; color:white; font-size:0.75rem; padding:4px 10px; border-radius:9999px; cursor:pointer; font-weight:bold;">承認</button>
                 <button onclick="rejectFriend('${escapeHtml(r.from)}')" style="background:transparent; border:1px solid var(--text-secondary); color:var(--text-secondary); font-size:0.75rem; padding:4px 8px; border-radius:9999px; cursor:pointer;">拒否</button>
               </div>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+
+      ${pendingRequestsOut.length > 0 ? `
+        <div style="margin-bottom: 20px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); padding: 12px; border-radius: 12px;">
+          <div style="font-weight: bold; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px;">⏳ 送信中のフレンド申請 (${pendingRequestsOut.length})</div>${pendingRequestsOut.map(u => `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span style="font-size:0.85rem;">👤 ${escapeHtml(u)}</span>
+              <button onclick="cancelFriendRequest('${escapeHtml(u)}')" style="background:none; border:1px solid #ff4949; color:#ff4949; font-size:0.75rem; padding:2px 8px; border-radius:9999px; cursor:pointer;">取り消し</button>
             </div>
           `).join('')}
         </div>
@@ -840,7 +888,8 @@ function renderTweets() {
       if (isFriend) {
         friendActionHtml = `<span style="font-size: 0.75rem; color: #00b900; font-weight:bold;">✔ フレンド</span>`;
       } else if (isPendingOut) {
-        friendActionHtml = `<span style="font-size: 0.75rem; color: var(--text-secondary); background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 9999px;">⏳ 申請中</span>`;
+        // 申請中の場合は「取り消し」ボタンを表示
+        friendActionHtml = `<button onclick="cancelFriendRequest('${escapeHtml(tweet.name)}')" style="background: rgba(255, 73, 73, 0.15); border: 1px solid #ff4949; color: #ff4949; font-size: 0.75rem; padding: 2px 8px; border-radius: 9999px; cursor: pointer;" title="申請を取り消す">⏳ 取消</button>`;
       } else {
         friendActionHtml = `<button onclick="requestFriend('${escapeHtml(tweet.name)}')" style="background: rgba(29, 155, 240, 0.15); border: 1px solid var(--accent-color); color: var(--accent-color); font-size: 0.75rem; padding: 2px 8px; border-radius: 9999px; cursor: pointer;">✉️ 申請</button>`;
       }
@@ -945,31 +994,50 @@ function renderTweets() {
 
 function addNotification(text) {
   notifications.unshift({ text, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
-  notifBadge.style.display = 'inline-block';
-  notifBadge.textContent = notifications.length;
+  saveLocalSettings();
+  updateNotificationBadge();
   playNotificationSound();
 }
 
 window.clearNotifications = function() {
   notifications = [];
-  notifBadge.style.display = 'none';
-  notifBadge.textContent = '0';
+  pendingRequestsIn = [];
+  saveLocalSettings();
+  updateNotificationBadge();
   renderNotifications();
 }
 
 function renderNotifications() {
   const list = document.getElementById('notificationList');
   if (!list) return;
-  if (notifications.length === 0) {
-    list.innerHTML = `<p style="color: var(--text-secondary); text-align: center; padding: 20px;">通知はありません</p>`;
-    return;
-  }
-  
+
   let html = `
     <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
-      <button onclick="clearNotifications()" style="background: none; border: 1px solid var(--border-color); color: var(--text-secondary); font-size: 0.75rem; padding: 4px 10px; border-radius: 9999px; cursor: pointer;">通知をクリア</button>
+      <button onclick="clearNotifications()" style="background: none; border: 1px solid var(--border-color); color: var(--text-secondary); font-size: 0.75rem; padding: 4px 10px; border-radius: 9999px; cursor: pointer;">通知をすべてクリア</button>
     </div>
   `;
+
+  if (notifications.length === 0 && pendingRequestsIn.length === 0) {
+    list.innerHTML = html + `<p style="color: var(--text-secondary); text-align: center; padding: 20px;">通知はありません</p>`;
+    return;
+  }
+
+  if (pendingRequestsIn.length > 0) {
+    html += `
+      <div style="margin-bottom: 16px; background: rgba(29, 155, 240, 0.1); border: 1px solid var(--accent-color); padding: 12px; border-radius: 12px;">
+        <div style="font-weight: bold; font-size: 0.9rem; color: var(--accent-color); margin-bottom: 8px;">📩 届いているフレンド申請 (${pendingRequestsIn.length})</div>
+        ${pendingRequestsIn.map(r => `
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size:0.85rem; font-weight:bold;">👤 ${escapeHtml(r.from)}</span>
+            <div style="display:flex; gap:6px;">
+              <button onclick="acceptFriend('${escapeHtml(r.from)}')" style="background: #00b900; border:none; color:white; font-size:0.75rem; padding:4px 10px; border-radius:9999px; cursor:pointer; font-weight:bold;">承認</button>
+              <button onclick="rejectFriend('${escapeHtml(r.from)}')" style="background:transparent; border:1px solid var(--text-secondary); color:var(--text-secondary); font-size:0.75rem; padding:4px 8px; border-radius:9999px; cursor:pointer;">拒否</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
 
   html += notifications.map(n => `
     <div class="notification-item">
