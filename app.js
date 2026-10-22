@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - フレンド完全同期・安定版
+// 平和 (Peaceful Board) - DM完全クラウドリアルタイム同期 ＆ ボタン連動リロール版
 // ==========================================
 
 // Firebase 初期化
@@ -78,6 +78,19 @@ function saveLocalSettings() {
   }
 }
 
+// --- リロール更新（操作後に全体の状態とUIを再描画） ---
+function rerollUpdate() {
+  saveLocalSettings();
+  renderTweets();
+  updateNotificationBadge();
+  if (document.getElementById('dmListModal') && document.getElementById('dmListModal').style.display === 'flex') {
+    openDmListModal();
+  }
+  if (currentChatFriend && document.getElementById('chatModal') && document.getElementById('chatModal').style.display === 'flex') {
+    renderChatContent();
+  }
+}
+
 // --- Firestore リアルタイムリスナー ---
 function initRealtimeSync() {
   db.collection('tweets').orderBy('id', 'desc').onSnapshot((snapshot) => {
@@ -85,7 +98,7 @@ function initRealtimeSync() {
     snapshot.forEach((doc) => {
       tweets.push(doc.data());
     });
-    renderTweets();
+    rerollUpdate();
   }, (error) => {
     console.warn("Firestoreツイート同期警告: ", error);
   });
@@ -107,14 +120,13 @@ function initRealtimeSync() {
         snapshot.forEach((doc) => {
           pendingRequestsIn.push(doc.data());
         });
-        saveLocalSettings();
-        updateNotificationBadge();
+        rerollUpdate();
       }, (e) => console.warn("申請受信リスナーエラー:", e));
     } catch (e) {
       console.warn("フレンド申請リスナーエラー:", e);
     }
 
-    // 2. 自分が出した申請がどうなっているか（承認されたか）を監視
+    // 2. 自分が出した申請の監視
     try {
       db.collection('friendRequests').where('from', '==', userProfile.name).onSnapshot((snapshot) => {
         const currentOutNames = [];
@@ -124,10 +136,8 @@ function initRealtimeSync() {
             currentOutNames.push(data.to);
           }
         });
-        // もしサーバー側から自分の申請が消えていたら、相手が承認してくれた（または自分で取り消した）と判定
         pendingRequestsOut.forEach(outName => {
           if (!currentOutNames.includes(outName)) {
-            // 相手とフレンドになっていない場合はフレンドに追加する
             if (!friends.includes(outName)) {
               friends.push(outName);
               if (!dms[outName]) dms[outName] = [];
@@ -136,14 +146,13 @@ function initRealtimeSync() {
           }
         });
         pendingRequestsOut = currentOutNames;
-        saveLocalSettings();
-        renderTweets();
+        rerollUpdate();
       }, (e) => console.warn("申請送信リスナーエラー:", e));
     } catch (e) {
       console.warn("申請送信監視エラー:", e);
     }
 
-    // 3. フレンドコネクション（双方向同期）の監視
+    // 3. フレンドコネクション（双方向）の監視
     try {
       db.collection('friendConnections').where('users', 'array-contains', userProfile.name).onSnapshot((snapshot) => {
         snapshot.forEach((doc) => {
@@ -153,14 +162,28 @@ function initRealtimeSync() {
             if (peer && !friends.includes(peer)) {
               friends.push(peer);
               if (!dms[peer]) dms[peer] = [];
-              saveLocalSettings();
             }
           }
         });
-        renderTweets();
+        rerollUpdate();
       }, (e) => console.warn("コネクションリスナーエラー:", e));
     } catch (e) {
       console.warn("フレンドコネクションリスナーエラー:", e);
+    }
+
+    // 4. DMチャットのリアルタイム同期（自分が含まれるチャットルームを監視）
+    try {
+      db.collection('dmRooms').where('users', 'array-contains', userProfile.name).onSnapshot((snapshot) => {
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data && data.messages && data.friendPair) {
+            dms[data.friendPair] = data.messages;
+          }
+        });
+        rerollUpdate();
+      }, (e) => console.warn("DM同期リスナーエラー:", e));
+    } catch (e) {
+      console.warn("DMリスナーエラー:", e);
     }
   }
 }
@@ -208,7 +231,7 @@ function checkInitialSetup() {
       } else {
         updateProfileUI();
         initRealtimeSync();
-        updateNotificationBadge();
+        rerollUpdate();
       }
     });
   }
@@ -243,7 +266,7 @@ function showNameInputModal() {
     }
 
     userProfile.name = val;
-    saveLocalSettings();
+    rerollUpdate();
     nameInputModal.remove();
     updateProfileUI();
     initRealtimeSync();
@@ -291,7 +314,7 @@ function injectBrandNotice() {
     container.style.cssText = 'display:flex; flex-direction:column; gap:8px; margin-top:8px;';
     
     container.innerHTML = `
-      <button onclick="toggleTheme()" id="themeToggleBtn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
+      <button onclick="toggleTheme(); rerollUpdate();" id="themeToggleBtn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
         ${typeof currentTheme !== 'undefined' && currentTheme === 'light' ? '☀️ ライトモード' : '🌙 ダークモード'}
       </button>
       <button onclick="toggleBookmarkView()" id="bookmarkNavBtn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
@@ -324,6 +347,7 @@ window.toggleSideMenu = function() {
     sidebar.classList.add('open');
     backdrop.style.display = 'block';
   }
+  rerollUpdate();
 }
 
 window.openTermsModal = function() {
@@ -351,9 +375,10 @@ window.openTermsModal = function() {
         <p style="margin-bottom: 8px; font-weight: bold; color: #00b900;">✨ 平和な空間づくりのために</p>
         <p>当プラットフォームは、世界中の人々が優しさ、笑顔、日常の美しい瞬間を安心して分かち合うための場所です。お互いを思いやり、温かいコミュニケーションを心がけて楽しくご利用ください。</p>
       </div>
-      <button onclick="closeModal('termsModal')" class="modal-submit" style="width: 100%;">同意して閉じる</button>
+      <button onclick="closeModal('termsModal'); rerollUpdate();" class="modal-submit" style="width: 100%;">同意して閉じる</button>
     </div>
   `;
+  rerollUpdate();
 }
 
 function updateProfileUI() {
@@ -376,19 +401,20 @@ window.openProfileModal = function() {
   inputAvatarUrl.value = userProfile.avatar;
   inputLang.value = userProfile.lang;
   profileModal.style.display = 'flex';
+  rerollUpdate();
 }
 
 window.openNotificationsModal = function() {
   notificationsModal.style.display = 'flex';
   renderNotifications();
   notifications = [];
-  saveLocalSettings();
-  updateNotificationBadge();
+  rerollUpdate();
 }
 
 window.closeModal = function(id) {
   const modal = document.getElementById(id);
   if (modal) modal.style.display = 'none';
+  rerollUpdate();
 }
 
 window.toggleBookmarkView = function() {
@@ -408,7 +434,7 @@ window.toggleBookmarkView = function() {
       myPostsBtn.style.color = 'var(--text-primary)';
     }
   }
-  renderTweets();
+  rerollUpdate();
 }
 
 window.toggleMyPostsView = function() {
@@ -428,7 +454,7 @@ window.toggleMyPostsView = function() {
       bookmarkBtn.style.color = 'var(--text-primary)';
     }
   }
-  renderTweets();
+  rerollUpdate();
 }
 
 window.toggleBookmark = function(id) {
@@ -437,8 +463,7 @@ window.toggleBookmark = function(id) {
   } else {
     bookmarks.push(id);
   }
-  saveLocalSettings();
-  renderTweets();
+  rerollUpdate();
 }
 
 async function updateTweetInFirestore(tweet) {
@@ -448,6 +473,7 @@ async function updateTweetInFirestore(tweet) {
 window.deleteTweet = async function(tweetId, tweetDeviceId) {
   if (tweetDeviceId && tweetDeviceId !== deviceId) {
     alert("❌ この投稿は他のユーザーの投稿であるため削除できません。");
+    rerollUpdate();
     return;
   }
   if (confirm("この投稿を削除しますか？")) {
@@ -458,6 +484,7 @@ window.deleteTweet = async function(tweetId, tweetDeviceId) {
       alert("削除に失敗しました。");
     }
   }
+  rerollUpdate();
 }
 
 window.toggleReaction = async function(tweetId, stampKey) {
@@ -480,19 +507,23 @@ window.toggleReaction = async function(tweetId, stampKey) {
   }
 
   await updateTweetInFirestore(tweet);
+  rerollUpdate();
 }
 
 window.requestFriend = async function(userName) {
   if (userName === userProfile.name) {
     alert("自分自身にフレンド申請は送れません。");
+    rerollUpdate();
     return;
   }
   if (friends.includes(userName)) {
     alert(`${userName} さんとは既にフレンドです。`);
+    rerollUpdate();
     return;
   }
   if (pendingRequestsOut.includes(userName)) {
     alert(`${userName} さんには既に申請済みです。`);
+    rerollUpdate();
     return;
   }
 
@@ -507,17 +538,19 @@ window.requestFriend = async function(userName) {
     if (!pendingRequestsOut.includes(userName)) {
       pendingRequestsOut.push(userName);
     }
-    saveLocalSettings();
     alert(`${userName} さんにフレンド申請を送信しました！`);
-    renderTweets();
   } catch (err) {
     console.error("フレンド申請エラー:", err);
     alert("フレンド申請の送信に失敗しました。");
   }
+  rerollUpdate();
 }
 
 window.cancelFriendRequest = async function(userName) {
-  if (!confirm(`${userName} さんへのフレンド申請を取り消しますか？`)) return;
+  if (!confirm(`${userName} さんへのフレンド申請を取り消しますか？`)) {
+    rerollUpdate();
+    return;
+  }
 
   try {
     const requestId1 = userProfile.name + '_' + userName;
@@ -527,34 +560,26 @@ window.cancelFriendRequest = async function(userName) {
     await db.collection('friendRequests').doc(requestId2).delete().catch(() => {});
 
     pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
-    saveLocalSettings();
     alert(`${userName} さんへのフレンド申請を取り消しました。`);
-    renderTweets();
   } catch (err) {
     console.error("申請キャンセルエラー:", err);
-    // ローカルだけでも強制クリア
     pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
-    saveLocalSettings();
-    renderTweets();
   }
+  rerollUpdate();
 }
 
-// --- フレンド申請承認（双方向に確実にコネクション作成） ---
 window.acceptFriend = async function(userName) {
   try {
-    // 1. 自分側のフレンドリストに追加
     if (!friends.includes(userName)) {
       friends.push(userName);
       if (!dms[userName]) dms[userName] = [];
     }
 
-    // 2. 該当する申請ドキュメントを両方のパターンで削除
     const requestId1 = userName + '_' + userProfile.name;
     const requestId2 = userProfile.name + '_' + userName;
     await db.collection('friendRequests').doc(requestId1).delete().catch(() => {});
     await db.collection('friendRequests').doc(requestId2).delete().catch(() => {});
 
-    // 3. サーバー上のフレンドコネクション（双方向）を保存
     const connectionId = [userProfile.name, userName].sort().join('_');
     await db.collection('friendConnections').doc(connectionId).set({
       users: [userProfile.name, userName],
@@ -564,20 +589,16 @@ window.acceptFriend = async function(userName) {
     pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
     pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
     
-    saveLocalSettings();
     addNotification(`${userName} さんとフレンドになりました！🤝`);
     alert(`${userName} さんのフレンド申請を承認しました！`);
     openDmListModal();
-    renderTweets();
   } catch (err) {
     console.error("承認エラー:", err);
-    // 万が一のクラウドエラー時もローカルで強制的にフレンド化
     if (!friends.includes(userName)) friends.push(userName);
     pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
-    saveLocalSettings();
     openDmListModal();
-    renderTweets();
   }
+  rerollUpdate();
 }
 
 window.rejectFriend = async function(userName) {
@@ -589,9 +610,8 @@ window.rejectFriend = async function(userName) {
   } catch(e) {}
 
   pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
-  saveLocalSettings();
   openDmListModal();
-  renderTweets();
+  rerollUpdate();
 }
 
 window.removeFriend = async function(userName) {
@@ -603,18 +623,16 @@ window.removeFriend = async function(userName) {
       await db.collection('friendConnections').doc(connectionId).delete();
     } catch(e) {}
 
-    saveLocalSettings();
     openDmListModal();
-    renderTweets();
   }
+  rerollUpdate();
 }
 
 window.unblockUser = function(userName) {
   blockedUsers = blockedUsers.filter(b => b !== userName);
-  saveLocalSettings();
   alert(`${userName} さんのブロックを解除しました。`);
   openDmListModal();
-  renderTweets();
+  rerollUpdate();
 }
 
 window.openDmListModal = function() {
@@ -652,7 +670,7 @@ window.openDmListModal = function() {
         <div style="margin-bottom: 20px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); padding: 12px; border-radius: 12px;">
           <div style="font-weight: bold; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
             <span>⏳ 送信中のフレンド申請 (${pendingRequestsOut.length})</span>
-            <button onclick="pendingRequestsOut=[]; saveLocalSettings(); openDmListModal(); renderTweets();" style="background:none; border:none; color:var(--text-secondary); font-size:0.7rem; cursor:pointer; text-decoration:underline;">スタック強制クリア</button>
+            <button onclick="pendingRequestsOut=[]; rerollUpdate(); openDmListModal();" style="background:none; border:none; color:var(--text-secondary); font-size:0.7rem; cursor:pointer; text-decoration:underline;">スタック強制クリア</button>
           </div>
           ${pendingRequestsOut.map(u => `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -719,10 +737,12 @@ window.openChat = function(friendName) {
   }
   chatModal.style.display = 'flex';
   renderChatContent();
+  rerollUpdate();
 }
 
 function renderChatContent() {
   const chatModal = document.getElementById('chatModal');
+  if (!chatModal || !currentChatFriend) return;
   const messages = dms[currentChatFriend] || [];
 
   chatModal.innerHTML = `
@@ -760,21 +780,37 @@ function renderChatContent() {
     </div>
   `;
   const msgBox = document.getElementById('chatMessages');
-  msgBox.scrollTop = msgBox.scrollHeight;
+  if (msgBox) msgBox.scrollTop = msgBox.scrollHeight;
 }
 
-window.sendDmMessage = function(e) {
+// --- クラウドリアルタイムDM送信機能 ---
+window.sendDmMessage = async function(e) {
   e.preventDefault();
   const input = document.getElementById('dmInput');
   const text = input.value.trim();
   if (!text || !currentChatFriend) return;
 
   const timeStr = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  if (!dms[currentChatFriend]) dms[currentChatFriend] = [];
+  
   dms[currentChatFriend].push({ sender: userProfile.name, text, time: timeStr });
-  saveLocalSettings();
+
+  try {
+    const friendPairKey = [userProfile.name, currentChatFriend].sort().join('_');
+    await db.collection('dmRooms').doc(friendPairKey).set({
+      friendPair: currentChatFriend,
+      users: [userProfile.name, currentChatFriend],
+      messages: dms[currentChatFriend],
+      lastUpdated: Date.now()
+    });
+  } catch (err) {
+    console.error("DMクラウド送信エラー:", err);
+  }
+
   input.value = '';
   renderChatContent();
   playNotificationSound();
+  rerollUpdate();
 }
 
 window.blockUser = function(userName) {
@@ -785,24 +821,22 @@ window.blockUser = function(userName) {
     friends = friends.filter(f => f !== userName);
     pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
     pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
-    
-    saveLocalSettings();
-    renderTweets();
     alert(`${userName} さんをブロックしました。`);
   }
+  rerollUpdate();
 }
 
 window.onSearchInput = function(val) {
   searchQuery = val.trim().toLowerCase();
   clearSearchBtn.style.display = searchQuery ? 'block' : 'none';
-  renderTweets();
+  rerollUpdate();
 }
 
 window.clearSearch = function() {
   searchQuery = '';
   searchInput.value = '';
   clearSearchBtn.style.display = 'none';
-  renderTweets();
+  rerollUpdate();
 }
 
 window.searchTag = function(tag) {
@@ -819,6 +853,7 @@ document.getElementById('profileForm').addEventListener('submit', async (e) => {
     const success = await claimUsername(newName);
     if (!success) {
       alert("❌ その名前は既に他の方が使用しています。別の名前にしてください。");
+      rerollUpdate();
       return;
     }
   }
@@ -832,23 +867,15 @@ document.getElementById('profileForm').addEventListener('submit', async (e) => {
     const reader = new FileReader();
     reader.onload = (event) => {
       userProfile.avatar = event.target.result;
-      saveLocalSettings();
       updateProfileUI();
-      if (typeof window.applyUI18n === 'function') {
-        window.applyUI18n(userProfile.lang);
-      }
       profileModal.style.display = 'none';
-      renderTweets();
+      rerollUpdate();
     };
     reader.readAsDataURL(file);
   } else {
-    saveLocalSettings();
     updateProfileUI();
-    if (typeof window.applyUI18n === 'function') {
-      window.applyUI18n(userProfile.lang);
-    }
     profileModal.style.display = 'none';
-    renderTweets();
+    rerollUpdate();
   }
 });
 
@@ -858,7 +885,7 @@ window.translateTweet = async function(tweetId) {
 
   if (tweet.translatedText) {
     tweet.translatedText = null;
-    renderTweets();
+    rerollUpdate();
     return;
   }
 
@@ -879,7 +906,7 @@ window.translateTweet = async function(tweetId) {
   } catch (err) {
     tweet.translatedText = '（翻訳通信エラーが発生しました）';
   }
-  renderTweets();
+  rerollUpdate();
 }
 
 const mediaInput = document.getElementById('mediaInput') || document.getElementById('imageInput');
@@ -895,12 +922,14 @@ if (mediaInput) {
     if (file.type.startsWith('video/')) {
       alert("⚠️ 動画のアップロードはできません。\n画像またはGIFアニメーションのみ選択してください。");
       mediaInput.value = '';
+      rerollUpdate();
       return;
     }
 
     if (file.size > 2000000) {
       alert("⚠️ 画像（またはGIF）のファイルサイズが大きすぎます（2MB以下にしてください）。");
       mediaInput.value = '';
+      rerollUpdate();
       return;
     }
 
@@ -911,6 +940,7 @@ if (mediaInput) {
         previewWrapper.innerHTML = `<img src="${currentMediaBase64}" alt="プレビュー" style="width: 100%; max-height: 200px; border-radius: 8px; object-fit: cover;">`;
       }
       if (imagePreviewContainer) imagePreviewContainer.style.display = 'block';
+      rerollUpdate();
     };
     reader.readAsDataURL(file);
   });
@@ -922,6 +952,7 @@ if (removeImageBtn) {
     if (mediaInput) mediaInput.value = '';
     if (previewWrapper) previewWrapper.innerHTML = '';
     if (imagePreviewContainer) imagePreviewContainer.style.display = 'none';
+    rerollUpdate();
   });
 }
 
@@ -1080,17 +1111,15 @@ function renderTweets() {
 
 function addNotification(text) {
   notifications.unshift({ text, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
-  saveLocalSettings();
-  updateNotificationBadge();
   playNotificationSound();
+  rerollUpdate();
 }
 
 window.clearNotifications = function() {
   notifications = [];
   pendingRequestsIn = [];
-  saveLocalSettings();
-  updateNotificationBadge();
   renderNotifications();
+  rerollUpdate();
 }
 
 function renderNotifications() {
@@ -1116,7 +1145,7 @@ function renderNotifications() {
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
             <span style="font-size:0.85rem; font-weight:bold;">👤 ${escapeHtml(r.from)}</span>
             <div style="display:flex; gap:6px;">
-              <button onclick="acceptFriend('${escapeHtml(r.from)}')" style="background: #00b900; border:none; color:white; font-size:0.75rem; padding:4px 10px; border-radius:9999px; cursor:pointer; font-weight:bold;">承認したのに片方しか…を解決する承認</button>
+              <button onclick="acceptFriend('${escapeHtml(r.from)}')" style="background: #00b900; border:none; color:white; font-size:0.75rem; padding:4px 10px; border-radius:9999px; cursor:pointer; font-weight:bold;">承認</button>
               <button onclick="rejectFriend('${escapeHtml(r.from)}')" style="background:transparent; border:1px solid var(--text-secondary); color:var(--text-secondary); font-size:0.75rem; padding:4px 8px; border-radius:9999px; cursor:pointer;">拒否</button>
             </div>
           </div>
@@ -1148,11 +1177,13 @@ window.toggleLike = async function(id) {
     }
     await updateTweetInFirestore(tweet);
   }
+  rerollUpdate();
 }
 
 window.toggleReply = function(id) {
   const el = document.getElementById(`replies-${id}`);
   if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
+  rerollUpdate();
 }
 
 window.addReply = async function(e, id) {
@@ -1171,6 +1202,7 @@ window.addReply = async function(e, id) {
     const replyContainer = document.getElementById(`replies-${id}`);
     if (replyContainer) replyContainer.style.display = 'block';
   }
+  rerollUpdate();
 }
 
 const tweetForm = document.getElementById('tweetForm');
@@ -1219,6 +1251,7 @@ if (tweetForm) {
       console.error("投稿エラー: ", err);
       alert("画像のファイルサイズが大きすぎるため投稿できませんでした。もっと軽い画像をお試しください。");
     }
+    rerollUpdate();
   });
 }
 
