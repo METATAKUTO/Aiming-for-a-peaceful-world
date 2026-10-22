@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - DM完全一致・リアルタイム同期版
+// 平和 (Peaceful Board) - 返信フォーム安定・DMリアルタイム同期版
 // ==========================================
 
 // Firebase 初期化
@@ -47,7 +47,7 @@ let currentFilterMode = 'all';
 let notifications = JSON.parse(localStorage.getItem('peace_notifications')) || [];
 let currentChatFriend = null;
 let currentMediaBase64 = '';
-let activeDmUnsubscribe = null; // DM個別リスナーの解除用
+let activeDmUnsubscribe = null;
 
 const sideAvatar = document.getElementById('sideAvatar');
 const sideName = document.getElementById('sideName');
@@ -79,7 +79,7 @@ function saveLocalSettings() {
   }
 }
 
-// --- リロール更新（操作後に全体の状態とUIを再描画） ---
+// --- リロール更新（通常の操作用） ---
 function rerollUpdate() {
   saveLocalSettings();
   renderTweets();
@@ -114,7 +114,6 @@ function initRealtimeSync() {
   });
 
   if (userProfile.name) {
-    // 1. 自分宛てのフレンド申請を監視
     try {
       db.collection('friendRequests').where('to', '==', userProfile.name).onSnapshot((snapshot) => {
         pendingRequestsIn = [];
@@ -127,7 +126,6 @@ function initRealtimeSync() {
       console.warn("フレンド申請リスナーエラー:", e);
     }
 
-    // 2. 自分が出した申請の監視
     try {
       db.collection('friendRequests').where('from', '==', userProfile.name).onSnapshot((snapshot) => {
         const currentOutNames = [];
@@ -153,7 +151,6 @@ function initRealtimeSync() {
       console.warn("申請送信監視エラー:", e);
     }
 
-    // 3. フレンドコネクションの監視
     try {
       db.collection('friendConnections').where('users', 'array-contains', userProfile.name).onSnapshot((snapshot) => {
         snapshot.forEach((doc) => {
@@ -401,7 +398,7 @@ window.closeModal = function(id) {
   const modal = document.getElementById(id);
   if (modal) modal.style.display = 'none';
   if (id === 'chatModal' && activeDmUnsubscribe) {
-    activeDmUnsubscribe(); // チャットを閉じたらリスナーを解除
+    activeDmUnsubscribe();
     activeDmUnsubscribe = null;
     currentChatFriend = null;
   }
@@ -714,7 +711,6 @@ window.openDmListModal = function() {
   `;
 }
 
-// --- 個別チャットルームを開いたときの専用リアルタイム監視（確実同期） ---
 window.openChat = function(friendName) {
   closeModal('dmListModal');
   currentChatFriend = friendName;
@@ -729,16 +725,13 @@ window.openChat = function(friendName) {
   }
   chatModal.style.display = 'flex';
 
-  // 以前のリスナーが残っていれば解除
   if (activeDmUnsubscribe) {
     activeDmUnsubscribe();
     activeDmUnsubscribe = null;
   }
 
-  // 2人の名前を必ずアルファベット順等で統一して同じIDを生成（すれ違い防止）
   const roomId = [userProfile.name, friendName].sort().join('_');
 
-  // このチャットルーム専用のリアルタイムリスナーを開始
   activeDmUnsubscribe = db.collection('dmRooms').doc(roomId).onSnapshot((doc) => {
     if (doc.exists) {
       const data = doc.data();
@@ -801,7 +794,6 @@ function renderChatContent() {
   if (msgBox) msgBox.scrollTop = msgBox.scrollHeight;
 }
 
-// --- クラウドリアルタイムDM送信機能（ID完全統一版） ---
 window.sendDmMessage = async function(e) {
   e.preventDefault();
   const input = document.getElementById('dmInput');
@@ -814,7 +806,6 @@ window.sendDmMessage = async function(e) {
   dms[currentChatFriend].push({ sender: userProfile.name, text, time: timeStr });
 
   try {
-    // 2人の名前を文字列順でソートしてIDにするため、どちらの端末から開いても100%同じルームに書き込まれます
     const roomId = [userProfile.name, currentChatFriend].sort().join('_');
     await db.collection('dmRooms').doc(roomId).set({
       friendPair: currentChatFriend,
@@ -1202,26 +1193,41 @@ window.toggleLike = async function(id) {
 window.toggleReply = function(id) {
   const el = document.getElementById(`replies-${id}`);
   if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
-  rerollUpdate();
+  // 返信欄を開閉したときは全体リロールせずそのままにする
 }
 
+// --- コメント返信時は全体リロールせず、入力トラブルを防ぐ仕様 ---
 window.addReply = async function(e, id) {
   e.preventDefault();
   const input = e.target.querySelector('.reply-input');
-  const text = input.value;
+  const text = input ? input.value : '';
   const tweet = tweets.find(t => t.id === id);
+
   if (tweet && text) {
     if (!tweet.replies) tweet.replies = [];
     tweet.replies.push({ name: userProfile.name, text });
     if (tweet.name !== userProfile.name) {
       addNotification(`${userProfile.name} さんがあなたの投稿に返信しました: "${text}"`);
     }
+    
+    // 入力欄をクリアしてクラウドへ保存（全体リロールは呼ばない）
     input.value = '';
     await updateTweetInFirestore(tweet);
+
+    // 該当する返信リストのHTML要素だけをピンポイントで再構築して入力欄が消えないようにする
+    const replyListContainer = document.getElementById(`reply-list-${id}`);
+    if (replyListContainer) {
+      replyListContainer.innerHTML = (tweet.replies || []).map(r => `
+        <div class="reply-item">
+          <strong>${escapeHtml(r.name)}:</strong>
+          <span>${formatTweetText(r.text)}</span>
+        </div>
+      `).join('');
+    }
+
     const replyContainer = document.getElementById(`replies-${id}`);
     if (replyContainer) replyContainer.style.display = 'block';
   }
-  rerollUpdate();
 }
 
 const tweetForm = document.getElementById('tweetForm');
