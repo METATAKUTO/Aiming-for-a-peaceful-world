@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - DM完全クラウドリアルタイム同期 ＆ ボタン連動リロール版
+// 平和 (Peaceful Board) - DM完全同期・高速リロール版
 // ==========================================
 
 // Firebase 初期化
@@ -152,7 +152,7 @@ function initRealtimeSync() {
       console.warn("申請送信監視エラー:", e);
     }
 
-    // 3. フレンドコネクション（双方向）の監視
+    // 3. フレンドコネクションの監視
     try {
       db.collection('friendConnections').where('users', 'array-contains', userProfile.name).onSnapshot((snapshot) => {
         snapshot.forEach((doc) => {
@@ -171,13 +171,17 @@ function initRealtimeSync() {
       console.warn("フレンドコネクションリスナーエラー:", e);
     }
 
-    // 4. DMチャットのリアルタイム同期（自分が含まれるチャットルームを監視）
+    // 4. DMチャットのリアルタイム同期（超強力リアルタイムリスナー）
     try {
       db.collection('dmRooms').where('users', 'array-contains', userProfile.name).onSnapshot((snapshot) => {
         snapshot.forEach((doc) => {
           const data = doc.data();
-          if (data && data.messages && data.friendPair) {
-            dms[data.friendPair] = data.messages;
+          if (data && data.messages && data.users) {
+            // 相手の名前を特定
+            const peer = data.users.find(u => u !== userProfile.name) || data.friendPair;
+            if (peer) {
+              dms[peer] = data.messages;
+            }
           }
         });
         rerollUpdate();
