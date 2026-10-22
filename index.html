@@ -3,84 +3,148 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>平和 / Peaceful Board</title>
-
-  <!-- Lucide Icons & Canvas Confetti -->
+  <title>平和 (Peaceful Board)</title>
+  
+  <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
-  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
 
   <style>
     :root {
       --bg-color: #000000;
       --card-bg: #16181c;
-      --border-color: #2f3336;
       --text-primary: #e7e9ea;
       --text-secondary: #71767b;
+      --border-color: #2f3336;
       --accent-color: #1d9bf0;
-      --accent-hover: #1a8cd8;
       --pink-color: #f91880;
-      --radius: 16px;
+      --hover-bg: rgba(255, 255, 255, 0.03);
+    }
+
+    [data-theme="light"] {
+      --bg-color: #ffffff;
+      --card-bg: #f7f9f9;
+      --text-primary: #0f1419;
+      --text-secondary: #536471;
+      --border-color: #eff3f4;
+      --accent-color: #1d9bf0;
+      --pink-color: #f91880;
+      --hover-bg: rgba(0, 0, 0, 0.03);
     }
 
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
 
     body {
       background-color: var(--bg-color);
       color: var(--text-primary);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      line-height: 1.4;
       display: flex;
       justify-content: center;
       min-height: 100vh;
+      transition: background-color 0.2s, color 0.2s;
     }
 
-    .app-layout {
+    .app-container {
       display: flex;
       width: 100%;
-      max-width: 950px;
+      max-width: 1200px;
     }
 
-    /* 左側サイドバー */
+    /* 左サイドバー */
     .sidebar-left {
-      width: 250px;
-      padding: 16px;
+      width: 275px;
+      padding: 20px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
+      border-right: 1px solid var(--border-color);
       height: 100vh;
       position: sticky;
       top: 0;
-      border-right: 1px solid var(--border-color);
     }
 
     .brand-logo {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: var(--accent-color);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .user-profile-card {
       display: flex;
       align-items: center;
       gap: 12px;
-      padding: 12px;
-      font-size: 1.2rem;
-      font-weight: bold;
-      color: var(--text-primary);
-      text-decoration: none;
-      margin-bottom: 12px;
-    }
-
-    .sidebar-profile {
-      display: flex;
-      align-items: center;
-      gap: 10px;
       padding: 10px;
       border-radius: 9999px;
-      background: rgba(255, 255, 255, 0.05);
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
       cursor: pointer;
-      transition: background 0.2s;
+      margin-top: auto;
     }
-    .sidebar-profile:hover {
-      background: rgba(255, 255, 255, 0.1);
+
+    .user-profile-card img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+
+    .user-info {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .user-name {
+      font-weight: bold;
+      font-size: 0.9rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .user-handle {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+    }
+
+    /* メインタイムライン */
+    .main-timeline {
+      flex: 1;
+      max-width: 600px;
+      border-right: 1px solid var(--border-color);
+      min-height: 100vh;
+    }
+
+    .timeline-header {
+      padding: 16px 20px;
+      font-size: 1.2rem;
+      font-weight: bold;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      background: var(--bg-color);
+      backdrop-filter: blur(10px);
+      z-index: 10;
+    }
+
+    /* 投稿フォーム */
+    .tweet-box {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      gap: 12px;
     }
 
     .user-avatar {
@@ -88,245 +152,69 @@
       height: 40px;
       border-radius: 50%;
       object-fit: cover;
-      background: #333;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
-      font-size: 0.9rem;
-      color: white;
-      flex-shrink: 0;
     }
 
-    .profile-info {
-      overflow: hidden;
-    }
-    .profile-name {
-      font-weight: bold;
-      font-size: 0.9rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .profile-lang {
-      font-size: 0.75rem;
-      color: var(--text-secondary);
-    }
-
-    /* メインフィードエリア */
-    .main-feed {
-      flex: 1;
-      max-width: 650px;
-      min-height: 100vh;
-    }
-
-    .feed-header {
-      position: sticky;
-      top: 0;
-      background: rgba(0, 0, 0, 0.65);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border-color);
-      z-index: 10;
-      padding: 16px;
-      font-size: 1.2rem;
-      font-weight: bold;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .header-actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-
-    .header-icon-btn {
-      background: transparent;
-      border: 1px solid var(--border-color);
-      color: var(--text-primary);
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-    }
-    .header-icon-btn:hover {
-      background: rgba(255,255,255,0.1);
-    }
-
-    .notification-badge {
-      position: absolute;
-      top: -2px; right: -2px;
-      background: var(--pink-color);
-      color: white;
-      font-size: 0.65rem;
-      padding: 2px 5px;
-      border-radius: 10px;
-      font-weight: bold;
-      display: none;
-    }
-
-    .settings-btn {
-      background: transparent;
-      border: 1px solid var(--border-color);
-      color: var(--text-primary);
-      padding: 6px 12px;
-      border-radius: 9999px;
-      font-size: 0.85rem;
-      cursor: pointer;
-    }
-    .settings-btn:hover {
-      background: rgba(255,255,255,0.1);
-    }
-
-    /* 検索バーエリア */
-    .search-box-container {
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--border-color);
-      background: rgba(255, 255, 255, 0.02);
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-
-    .search-input-wrapper {
-      position: relative;
-      flex: 1;
-      display: flex;
-      align-items: center;
-    }
-
-    .search-input-wrapper i {
-      position: absolute;
-      left: 12px;
-      color: var(--text-secondary);
-      width: 16px;
-    }
-
-    .search-input {
-      width: 100%;
-      background: #202327;
-      border: 1px solid transparent;
-      color: var(--text-primary);
-      padding: 8px 12px 8px 36px;
-      border-radius: 9999px;
-      font-size: 0.9rem;
-      outline: none;
-    }
-    .search-input:focus {
-      border-color: var(--accent-color);
-      background: #000000;
-    }
-
-    .clear-search-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-secondary);
-      font-size: 0.8rem;
-      cursor: pointer;
-      display: none;
-      padding: 4px 8px;
-    }
-    .clear-search-btn:hover {
-      color: var(--text-primary);
-    }
-
-    /* 投稿入力エリア */
-    .post-box {
-      padding: 16px;
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      gap: 12px;
-    }
-
-    .post-input-container {
+    .tweet-box-content {
       flex: 1;
     }
 
-    textarea.post-textarea {
+    .tweet-textarea {
       width: 100%;
       background: transparent;
       border: none;
       color: var(--text-primary);
-      font-size: 1.05rem;
+      font-size: 1.1rem;
       resize: none;
       outline: none;
-      min-height: 70px;
-      font-family: inherit;
-      margin-top: 8px;
+      min-height: 80px;
+      margin-bottom: 12px;
     }
 
-    .image-preview-container {
-      position: relative;
-      margin-top: 8px;
-      margin-bottom: 8px;
-      display: none;
-    }
-
-    .image-preview {
-      width: 100%;
-      max-height: 250px;
-      object-fit: cover;
-      border-radius: 12px;
-      border: 1px solid var(--border-color);
-    }
-
-    .remove-image-btn {
-      position: absolute;
-      top: 8px; right: 8px;
-      background: rgba(15, 20, 25, 0.75);
-      color: white; border: none;
-      border-radius: 50%; width: 28px; height: 28px;
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
-    }
-
-    .post-actions {
+    .tweet-box-footer {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-top: 8px;
       border-top: 1px solid var(--border-color);
-      padding-top: 10px;
-    }
-
-    .icon-btn {
-      background: transparent;
-      border: none;
-      color: var(--accent-color);
-      cursor: pointer;
-      padding: 6px;
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
+      padding-top: 12px;
     }
 
     .post-submit-btn {
       background-color: var(--accent-color);
-      color: white; border: none;
-      padding: 8px 18px; border-radius: 9999px;
-      font-weight: bold; cursor: pointer;
+      color: white;
+      border: none;
+      padding: 8px 20px;
+      border-radius: 9999px;
+      font-weight: bold;
+      cursor: pointer;
     }
-    .post-submit-btn:hover { background-color: var(--accent-hover); }
 
-    /* 投稿カード */
+    .post-submit-btn:hover {
+      opacity: 0.9;
+    }
+
+    /* ツイートカード */
     .tweet-card {
-      padding: 16px;
+      padding: 16px 20px;
       border-bottom: 1px solid var(--border-color);
       display: flex;
       gap: 12px;
+      animation: fadeIn 0.3s;
     }
 
-    .tweet-content { flex: 1; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .tweet-content {
+      flex: 1;
+    }
 
     .tweet-header {
       display: flex;
       align-items: center;
       gap: 8px;
       margin-bottom: 4px;
-      flex-wrap: wrap;
     }
 
     .tweet-author {
@@ -337,215 +225,348 @@
     .tweet-meta {
       font-size: 0.75rem;
       color: var(--text-secondary);
-      background: rgba(255,255,255,0.05);
-      padding: 2px 6px;
-      border-radius: 4px;
     }
 
     .tweet-text {
-      margin-bottom: 10px;
       font-size: 0.95rem;
-      white-space: pre-line;
+      line-height: 1.5;
+      word-break: break-word;
+      margin-bottom: 8px;
     }
 
-    /* ハッシュタグリンクスタイル */
+    .tweet-image {
+      width: 100%;
+      max-height: 350px;
+      border-radius: 12px;
+      object-fit: cover;
+      margin-top: 8px;
+    }
+
+    .tweet-footer {
+      display: flex;
+      gap: 24px;
+      margin-top: 12px;
+      color: var(--text-secondary);
+    }
+
+    .tweet-action {
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.85rem;
+    }
+
+    .tweet-action:hover {
+      color: var(--pink-color);
+    }
+
+    .tweet-action.liked {
+      color: var(--pink-color);
+    }
+
+    .translate-link {
+      background: none;
+      border: none;
+      color: var(--accent-color);
+      font-size: 0.8rem;
+      cursor: pointer;
+      margin-top: 4px;
+      display: block;
+    }
+
+    .translated-box {
+      background: var(--hover-bg);
+      border-left: 2px solid var(--accent-color);
+      padding: 8px 12px;
+      margin-top: 6px;
+      font-size: 0.85rem;
+      border-radius: 0 8px 8px 0;
+    }
+
     .hashtag-link {
       color: var(--accent-color);
-      text-decoration: none;
       cursor: pointer;
-      font-weight: 500;
     }
     .hashtag-link:hover {
       text-decoration: underline;
     }
 
-    .translated-box {
-      background: rgba(29, 155, 240, 0.08);
-      border-left: 3px solid var(--accent-color);
-      padding: 8px 12px;
-      border-radius: 4px;
-      margin-top: 8px; margin-bottom: 8px;
-      font-size: 0.9rem;
-    }
-
-    .translate-link {
-      font-size: 0.8rem;
-      color: var(--accent-color);
-      cursor: pointer; background: none; border: none;
-      margin-bottom: 6px; display: inline-block;
-    }
-    .translate-link:hover { text-decoration: underline; }
-
-    .tweet-image {
-      width: 100%; max-height: 300px;
-      object-fit: cover; border-radius: 12px;
-      border: 1px solid var(--border-color);
-      margin-bottom: 10px;
-    }
-
-    .tweet-footer {
-      display: flex;
-      gap: 32px;
-      color: var(--text-secondary);
-    }
-
-    .tweet-action {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 0.85rem; cursor: pointer;
-      background: transparent; border: none;
-      color: var(--text-secondary);
-    }
-    .tweet-action:hover { color: var(--accent-color); }
-    .tweet-action.liked { color: var(--pink-color); }
-
-    /* コメント・返信 */
+    /* 返信欄 */
     .replies-container {
-      margin-top: 10px; padding-top: 10px;
+      margin-top: 12px;
+      padding-top: 12px;
       border-top: 1px solid var(--border-color);
       display: none;
     }
+
     .reply-item {
-      display: flex; gap: 8px; margin-bottom: 6px;
-      font-size: 0.85rem; background: rgba(255,255,255,0.03);
-      padding: 6px 10px; border-radius: 8px;
-    }
-    .reply-form { display: flex; gap: 8px; margin-top: 8px; }
-    .reply-input {
-      flex: 1; background: transparent; border: 1px solid var(--border-color);
-      color: var(--text-primary); padding: 6px 12px; border-radius: 9999px;
-      font-size: 0.85rem; outline: none;
-    }
-    .reply-btn {
-      background: var(--accent-color); color: white; border: none;
-      padding: 6px 14px; border-radius: 9999px; font-size: 0.8rem;
-      font-weight: bold; cursor: pointer;
+      font-size: 0.85rem;
+      margin-bottom: 6px;
+      background: var(--hover-bg);
+      padding: 6px 10px;
+      border-radius: 8px;
     }
 
-    /* モーダル共通 */
+    .reply-form {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .reply-input {
+      flex: 1;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 6px 12px;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      outline: none;
+    }
+
+    .reply-btn {
+      background: var(--accent-color);
+      color: white;
+      border: none;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    /* 右サイドバー */
+    .sidebar-right {
+      width: 350px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+
+    .search-box {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 9999px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .search-input {
+      background: transparent;
+      border: none;
+      color: var(--text-primary);
+      outline: none;
+      width: 100%;
+      font-size: 0.9rem;
+    }
+
+    .widget {
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 16px;
+    }
+
+    .widget-title {
+      font-weight: bold;
+      font-size: 1rem;
+      margin-bottom: 12px;
+    }
+
+    /* モーダル */
     .modal-overlay {
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.7); display: none;
-      justify-content: center; align-items: center; z-index: 100;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      backdrop-filter: blur(4px);
     }
+
     .modal-content {
-      background: var(--card-bg); padding: 24px; border-radius: 16px;
-      width: 90%; max-width: 400px; border: 1px solid var(--border-color);
-      max-height: 80vh; overflow-y: auto;
+      background: var(--card-bg);
+      border: 1px solid var(--border-color);
+      padding: 24px;
+      border-radius: 16px;
+      width: 90%;
+      max-width: 500px;
     }
-    .modal-title { font-size: 1.2rem; font-weight: bold; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;}
-    .form-group { margin-bottom: 14px; }
-    .form-group label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 6px; }
-    .form-input {
-      width: 100%; background: transparent; border: 1px solid var(--border-color);
-      color: var(--text-primary); padding: 10px; border-radius: 8px; font-size: 0.95rem; outline: none;
+
+    .modal-title {
+      font-size: 1.2rem;
+      font-weight: bold;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .form-input, .form-select {
+      width: 100%;
+      background: var(--bg-color);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      outline: none;
+    }
+
     .modal-submit {
-      width: 100%; background: var(--accent-color); color: white; border: none;
-      padding: 10px; border-radius: 9999px; font-weight: bold; cursor: pointer; margin-top: 10px;
+      background: var(--accent-color);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 9999px;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
     }
 
     .notification-item {
-      padding: 10px; border-bottom: 1px solid var(--border-color);
-      font-size: 0.9rem; display: flex; gap: 8px; align-items: center;
+      display: flex;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 0.9rem;
     }
 
-    @media (max-width: 680px) {
-      .sidebar-left { width: 70px; padding: 12px 8px; }
-      .brand-title, .profile-info { display: none; }
+    @media (max-width: 1024px) {
+      .sidebar-right { display: none; }
+    }
+    @media (max-width: 768px) {
+      .sidebar-left { width: 80px; padding: 12px; }
+      .sidebar-left .brand-logo span, .user-info, #sidebarBtnsContainer { display: none; }
     }
   </style>
 </head>
 <body>
 
-  <div class="app-layout">
-    <!-- 左側サイドバー -->
-    <nav class="sidebar-left">
+  <div class="app-container">
+    <!-- 左サイドバー -->
+    <aside class="sidebar-left">
       <div>
-        <a href="#" class="brand-logo" onclick="clearSearch()">
-          🕊️ <span class="brand-title">平和</span>
-        </a>
+        <div class="brand-logo">
+          <span>🕊️</span>
+          <span>平和</span>
+        </div>
+        <button onclick="openNotificationsModal()" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px; position: relative;">
+          🔔 通知
+          <span id="notifBadge" style="position: absolute; top: 6px; right: 12px; background: var(--pink-color); color: white; border-radius: 50%; padding: 2px 6px; font-size: 0.65rem; display: none;">0</span>
+        </button>
       </div>
-      
-      <div class="sidebar-profile" onclick="openProfileModal()">
-        <img id="sideAvatar" class="user-avatar" src="" alt="Avatar">
-        <div class="profile-info">
-          <div id="sideName" class="profile-name">平和すき</div>
-          <div id="sideLang" class="profile-lang">言語: 日本語</div>
+
+      <div class="user-profile-card" onclick="openProfileModal()">
+        <img id="sideAvatar" src="" alt="Avatar">
+        <div class="user-info">
+          <span id="sideName" class="user-name">読み込み中...</span>
+          <span id="sideLang" class="user-handle">🌐 日本語</span>
         </div>
       </div>
-    </nav>
+    </aside>
 
     <!-- メインタイムライン -->
-    <main class="main-feed">
-      <header class="feed-header">
-        <span>平和な空間</span>
-        <div class="header-actions">
-          <button class="header-icon-btn" onclick="openNotificationsModal()" title="通知">
-            <i data-lucide="bell" style="width: 18px;"></i>
-            <span id="notifBadge" class="notification-badge">0</span>
-          </button>
-          <button class="settings-btn" onclick="openProfileModal()">プロフィール</button>
-        </div>
+    <main class="main-timeline">
+      <header class="timeline-header">
+        <span>ホーム</span>
       </header>
 
-      <!-- 検索バーエリア -->
-      <div class="search-box-container">
-        <div class="search-input-wrapper">
-          <i data-lucide="search"></i>
-          <input type="text" id="searchInput" class="search-input" placeholder="キーワードや #ハッシュタグ で検索..." oninput="onSearchInput(this.value)">
-        </div>
-        <button id="clearSearchBtn" class="clear-search-btn" onclick="clearSearch()">クリア</button>
-      </div>
-
-      <!-- 新規投稿ボックス -->
-      <section class="post-box">
-        <img id="postAvatar" class="user-avatar" src="" alt="Avatar" style="width: 40px; height: 40px;">
-        <div class="post-input-container">
+      <!-- 投稿フォーム -->
+      <div class="tweet-box">
+        <img id="postAvatar" class="user-avatar" src="" alt="Avatar">
+        <div class="tweet-box-content">
           <form id="tweetForm">
-            <textarea id="tweetText" class="post-textarea" placeholder="いまどんな気分？ #平和 などのタグをつけて投稿..." required></textarea>
-
-            <div id="imagePreviewContainer" class="image-preview-container">
-              <img id="imagePreview" class="image-preview" src="" alt="添付画像">
-              <button type="button" class="remove-image-btn" id="removeImageBtn">✕</button>
+            <textarea id="tweetText" class="tweet-textarea" placeholder="いまどんな気持ち？平和な日常をつぶやこう..." required></textarea>
+            
+            <!-- プレビューエリア（画像＆動画対応） -->
+            <div id="imagePreviewContainer" style="display: none; margin-bottom: 12px; position: relative; max-width: 100%;">
+              <div id="previewWrapper"></div>
+              <button type="button" id="removeImageBtn" style="position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.7); color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; font-weight: bold;">✕</button>
             </div>
 
-            <div class="post-actions">
-              <label class="icon-btn" title="画像を添付">
-                <i data-lucide="image"></i>
-                <input type="file" id="imageInput" accept="image/*" style="display: none;">
-              </label>
-
-              <button type="submit" class="post-submit-btn">投稿</button>
+            <div class="tweet-box-footer">
+              <!-- 画像・動画選択ボタン (1分自動カット対応) -->
+              <input type="file" id="mediaInput" accept="image/*,video/*" style="display: none;">
+              <button type="button" onclick="document.getElementById('mediaInput').click()" style="background: transparent; border: 1px solid var(--border-color); color: var(--accent-color); padding: 6px 14px; border-radius: 9999px; cursor: pointer; font-size: 0.85rem; font-weight: bold; display: flex; align-items: center; gap: 6px;">
+                📷 画像・動画 <span style="font-size: 0.7rem; color: var(--text-secondary);">(1分自動カット)</span>
+              </button>
+              
+              <button type="submit" class="post-submit-btn">ポストする</button>
             </div>
           </form>
         </div>
-      </section>
+      </div>
 
-      <!-- 投稿一覧 -->
-      <section id="tweetList"></section>
+      <!-- タイムライン一覧 -->
+      <div id="tweetList"></div>
     </main>
+
+    <!-- 右サイドバー -->
+    <aside class="sidebar-right">
+      <div class="search-box">
+        <i>🔍</i>
+        <input type="text" id="searchInput" class="search-input" placeholder="キーワードや #ハッシュタグ で検索" oninput="onSearchInput(this.value)">
+        <button id="clearSearchBtn" onclick="clearSearch()" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; display:none;">✕</button>
+      </div>
+
+      <div class="widget">
+        <div class="widget-title">🌍 世界の平和の様子</div>
+        <div id="worldTimeWidget" style="font-size: 0.85rem; display: flex; flex-direction: column; gap: 8px;">
+          <!-- worldtime.jsによって自動生成されます -->
+        </div>
+      </div>
+    </aside>
   </div>
 
-  <!-- プロフィール設定モーダル -->
+  <!-- プロフィール編集モーダル -->
   <div id="profileModal" class="modal-overlay">
     <div class="modal-content">
       <div class="modal-title">
-        <span>プロフィール設定</span>
-        <button onclick="closeModal('profileModal')" style="background:none; border:none; color:white; cursor:pointer;">✕</button>
+        <span>プロフィール編集</span>
+        <button onclick="closeModal('profileModal')" style="background:none; border:none; color:var(--text-primary); cursor:pointer; font-size: 1.1rem;">✕</button>
       </div>
       <form id="profileForm">
         <div class="form-group">
-          <label>表示名</label>
+          <label class="form-label">表示名</label>
           <input type="text" id="inputName" class="form-input" required>
         </div>
         <div class="form-group">
-          <label>アイコン画像 (ファイル または URL)</label>
-          <input type="file" id="inputAvatarFile" class="form-input" accept="image/*" style="margin-bottom: 6px;">
-          <input type="text" id="inputAvatarUrl" class="form-input" placeholder="https://...">
+          <label class="form-label">アバター画像URL</label>
+          <input type="url" id="inputAvatarUrl" class="form-input" placeholder="https://...">
         </div>
         <div class="form-group">
-          <label>あなたの言語 (国旗バッジに反映)</label>
-          <select id="inputLang" class="form-input">
+          <label class="form-label">または画像ファイルを選択</label>
+          <input type="file" id="inputAvatarFile" class="form-input" accept="image/*" style="padding: 6px;">
+        </div>
+        <div class="form-group">
+          <label class="form-label">母国語 / 言語</label>
+          <select id="inputLang" class="form-select">
             <option value="ja">🇯🇵 日本語 (Japanese)</option>
             <option value="en">🇺🇸 英語 (English)</option>
             <option value="ko">🇰🇷 韓国語 (Korean)</option>
@@ -562,26 +583,25 @@
 
   <!-- 通知モーダル -->
   <div id="notificationsModal" class="modal-overlay">
-    <div class="modal-content">
+    <div class="modal-content" style="max-height: 80vh; overflow-y: auto;">
       <div class="modal-title">
-        <span>通知センター 🔔</span>
-        <button onclick="closeModal('notificationsModal')" style="background:none; border:none; color:white; cursor:pointer;">✕</button>
+        <span>通知</span>
+        <button onclick="closeModal('notificationsModal')" style="background:none; border:none; color:var(--text-primary); cursor:pointer; font-size: 1.1rem;">✕</button>
       </div>
-      <div id="notificationList">
-        <p style="color: var(--text-secondary); text-align: center; padding: 20px;">通知はありません</p>
-      </div>
+      <div id="notificationList"></div>
     </div>
   </div>
-
-  <!-- Firebase SDK の読み込み -->
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
   <!-- 各種プラグインの読み込み -->
   <script src="./i18n.js"></script>
   <script src="./theme.js"></script>
   <script src="./worldtime.js"></script>
-  <!-- JavaScript（メイン） -->
+
+  <!-- Firebase SDK の読み込み -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+  <!-- メイン処理 (app.js) -->
   <script src="./app.js"></script>
 </body>
 </html>
