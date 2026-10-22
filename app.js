@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - 名前重複防止＆デバイスID削除管理版
+// 平和 (Peaceful Board) - メニュー折りたたみ＆開閉対応版
 // ==========================================
 
 // Firebase 初期化
@@ -39,9 +39,9 @@ let bookmarks = JSON.parse(localStorage.getItem('peace_bookmarks')) || [];
 let dms = JSON.parse(localStorage.getItem('peace_dms')) || {};
 
 let tweets = [];
-let registeredUsers = {}; // 登録済みユーザー名のリスト（名前 -> deviceId）
+let registeredUsers = {};
 let searchQuery = '';
-let currentFilterMode = 'all'; // 'all', 'bookmarks', 'my_posts'
+let currentFilterMode = 'all';
 let notifications = [];
 let currentChatFriend = null;
 let currentMediaBase64 = '';
@@ -75,9 +75,8 @@ function saveLocalSettings() {
   }
 }
 
-// --- Firestore リアルタイムリスナー（ツイート＆ユーザー名予約の同期） ---
+// --- Firestore リアルタイムリスナー ---
 function initRealtimeSync() {
-  // ツイートの同期
   db.collection('tweets').orderBy('id', 'desc').onSnapshot((snapshot) => {
     tweets = [];
     snapshot.forEach((doc) => {
@@ -88,7 +87,6 @@ function initRealtimeSync() {
     console.error("Firestoreツイート同期エラー: ", error);
   });
 
-  // ユーザー名台帳の同期（名前の重複を防ぐため）
   db.collection('users').onSnapshot((snapshot) => {
     registeredUsers = {};
     snapshot.forEach((doc) => {
@@ -99,19 +97,14 @@ function initRealtimeSync() {
   });
 }
 
-// --- 名前の重複チェックと登録 ---
 async function claimUsername(name) {
   const userDocRef = db.collection('users').doc(name);
   try {
     const doc = await userDocRef.get();
     if (doc.exists) {
-      // 既にその名前が存在する場合、自分のデバイスIDと同じならOK
-      if (doc.data().deviceId === deviceId) {
-        return true;
-      }
-      return false; // 他の人が使っている
+      if (doc.data().deviceId === deviceId) return true;
+      return false;
     } else {
-      // 新規登録
       await userDocRef.set({ deviceId: deviceId });
       return true;
     }
@@ -127,10 +120,9 @@ function checkInitialSetup() {
     showNameInputModal();
   } else {
     if (savedName) userProfile.name = savedName;
-    // 起動時に自分の名前を再登録確認
     claimUsername(userProfile.name).then((success) => {
       if (!success) {
-        alert("⚠️ あなたが前回使っていた名前は、現在他の方が使用中のためリセットされました。新しい名前を設定してください。");
+        alert("⚠️ 前回の名前は現在他の方が使用中のためリセットされました。");
         localStorage.removeItem('peace_username');
         userProfile.name = '';
         showNameInputModal();
@@ -201,23 +193,37 @@ function playNotificationSound() {
   }
 }
 
+// --- メニューの折りたたみ開閉機能の注入 ---
 function injectBrandNotice() {
   const brandLogo = document.querySelector('.brand-logo');
   if (brandLogo && !document.getElementById('brandNotice')) {
     const noticeDiv = document.createElement('div');
     noticeDiv.id = 'brandNotice';
-    noticeDiv.style.cssText = 'font-size: 0.7rem; color: var(--text-secondary); padding-left: 12px; margin-top: -8px; margin-bottom: 16px; line-height: 1.3;';
-    noticeDiv.innerHTML = '⚠️ 誹謗中傷や争いを避け、優しさと笑顔の共有をお願いします。';
+    noticeDiv.style.cssText = 'font-size: 0.7rem; color: var(--text-secondary); padding-left: 4px; margin-top: -6px; margin-bottom: 12px; line-height: 1.3;';
+    noticeDiv.innerHTML = '⚠️ 誹謗中傷や争いを避け、優しさと笑顔の共有を。';
     brandLogo.after(noticeDiv);
   }
 
   const sidebar = document.querySelector('.sidebar-left > div:first-child');
-  if (sidebar && !document.getElementById('sidebarBtnsContainer')) {
-    const container = document.createElement('div');
-    container.id = 'sidebarBtnsContainer';
-    container.style.cssText = 'display:flex; flex-direction:column; gap:8px; margin-top:8px;';
+  if (sidebar && !document.getElementById('menuToggleContainer')) {
+    // 開閉用のトグルボタン（≡ メニュー）
+    const toggleContainer = document.createElement('div');
+    toggleContainer.id = 'menuToggleContainer';
+    toggleContainer.style.cssText = 'margin-bottom: 12px;';
     
-    container.innerHTML = `
+    toggleContainer.innerHTML = `
+      <button onclick="toggleSideMenu()" id="menuToggleBtn" style="background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        ≡ メニューを開く
+      </button>
+    `;
+    sidebar.appendChild(toggleContainer);
+
+    // 各種機能ボタンを格納するコンテナ（初期はスマホで非表示、トグルで開閉）
+    const drawerContainer = document.createElement('div');
+    drawerContainer.id = 'sidebarBtnsContainer';
+    drawerContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;';
+    
+    drawerContainer.innerHTML = `
       <button onclick="toggleTheme()" id="themeToggleBtn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
         ${typeof currentTheme !== 'undefined' && currentTheme === 'light' ? '☀️ ライトモード' : '🌙 ダークモード'}
       </button>
@@ -234,7 +240,33 @@ function injectBrandNotice() {
         ⚠️ ご注意・利用規約
       </button>
     `;
-    sidebar.appendChild(container);
+    sidebar.appendChild(drawerContainer);
+
+    // スマホ画面（幅768px以下）ではデフォルトで折りたたむ
+    if (window.innerWidth <= 768) {
+      drawerContainer.style.display = 'none';
+    }
+  }
+}
+
+// --- メニュー開閉の切り替え処理 ---
+let isMenuOpen = false;
+window.toggleSideMenu = function() {
+  const drawerContainer = document.getElementById('sidebarBtnsContainer');
+  const menuToggleBtn = document.getElementById('menuToggleBtn');
+  if (!drawerContainer) return;
+
+  isMenuOpen = !isMenuOpen;
+  if (isMenuOpen) {
+    drawerContainer.style.display = 'flex';
+    menuToggleBtn.textContent = '✕ メニューを閉じる';
+    menuToggleBtn.style.borderColor = 'var(--accent-color)';
+    menuToggleBtn.style.color = 'var(--accent-color)';
+  } else {
+    drawerContainer.style.display = 'none';
+    menuToggleBtn.textContent = '≡ メニューを開く';
+    menuToggleBtn.style.borderColor = 'var(--border-color)';
+    menuToggleBtn.style.color = 'var(--text-primary)';
   }
 }
 
@@ -359,7 +391,7 @@ async function updateTweetInFirestore(tweet) {
   await db.collection('tweets').doc(String(tweet.id)).set(tweet);
 }
 
-// --- 投稿削除機能（デバイスID一致で本人確認） ---
+// --- 投稿削除機能 ---
 window.deleteTweet = async function(tweetId, tweetDeviceId) {
   if (tweetDeviceId && tweetDeviceId !== deviceId) {
     alert("❌ この投稿は他のユーザーの投稿であるため削除できません。");
@@ -634,13 +666,11 @@ window.searchTag = function(tag) {
   window.onSearchInput(tag);
 }
 
-// --- プロフィール変更時の処理（名前の重複チェック付き） ---
 document.getElementById('profileForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const newName = inputName.value.trim();
   if (!newName) return;
 
-  // もし名前を変更する場合、重複チェック
   if (newName !== userProfile.name) {
     const success = await claimUsername(newName);
     if (!success) {
@@ -708,7 +738,7 @@ window.translateTweet = async function(tweetId) {
   renderTweets();
 }
 
-// --- メディア（画像・GIF）選択時の処理 ---
+// --- メディア選択時の処理 ---
 const mediaInput = document.getElementById('mediaInput') || document.getElementById('imageInput');
 const imagePreviewContainer = document.getElementById('imagePreviewContainer');
 const previewWrapper = document.getElementById('previewWrapper');
@@ -808,7 +838,6 @@ function renderTweets() {
       }
     }
 
-    // 自分の投稿にのみ削除ボタンを表示
     let deleteBtnHtml = isMyTweet 
       ? `<button onclick="deleteTweet(${tweet.id}, '${tweet.deviceId || ''}')" style="background:none; border:1px solid #ff4949; color:#ff4949; font-size:0.7rem; padding:2px 8px; border-radius:9999px; cursor:pointer;" title="削除">🗑️ 削除</button>` 
       : '';
@@ -992,7 +1021,7 @@ if (tweetForm) {
 
     const newTweet = {
       id: Date.now(),
-      deviceId: deviceId, // 投稿者のデバイスIDを埋め込むことで本人確認
+      deviceId: deviceId,
       name: userProfile.name,
       avatar: userProfile.avatar,
       text: tweetText.value,
@@ -1011,7 +1040,6 @@ if (tweetForm) {
     try {
       await db.collection('tweets').doc(String(newTweet.id)).set(newTweet);
       
-      // 投稿成功時に入力欄とプレビューをクリア
       tweetText.value = '';
       currentMediaBase64 = '';
       if (mediaInput) mediaInput.value = '';
