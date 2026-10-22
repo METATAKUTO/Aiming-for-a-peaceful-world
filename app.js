@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - フレンド申請キャンセル対応版
+// 平和 (Peaceful Board) - 双方向フレンド同期対応版
 // ==========================================
 
 // Firebase 初期化
@@ -78,7 +78,7 @@ function saveLocalSettings() {
   }
 }
 
-// --- Firestore リアルタイムリスナー ---
+// --- Firestore リアルタイムリスナー（フレンド関係の自動同期） ---
 function initRealtimeSync() {
   db.collection('tweets').orderBy('id', 'desc').onSnapshot((snapshot) => {
     tweets = [];
@@ -100,6 +100,7 @@ function initRealtimeSync() {
   });
 
   if (userProfile.name) {
+    // 1. 自分宛てのフレンド申請を監視
     try {
       db.collection('friendRequests').where('to', '==', userProfile.name).onSnapshot((snapshot) => {
         pendingRequestsIn = [];
@@ -108,11 +109,30 @@ function initRealtimeSync() {
         });
         saveLocalSettings();
         updateNotificationBadge();
-      }, (err) => {
-        console.warn("フレンド申請同期警告:", err);
       });
     } catch (e) {
       console.warn("フレンド申請リスナーエラー:", e);
+    }
+
+    // 2. 自分が承認された（フレンド成立した）ことをリアルタイムで監視
+    try {
+      db.collection('friendConnections').where('users', 'array-contains', userProfile.name).onSnapshot((snapshot) => {
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data && data.users) {
+            // もう一人のユーザーを特定
+            const peer = data.users.find(u => u !== userProfile.name);
+            if (peer && !friends.includes(peer)) {
+              friends.push(peer);
+              if (!dms[peer]) dms[peer] = [];
+              saveLocalSettings();
+            }
+          }
+        });
+        renderTweets();
+      });
+    } catch (e) {
+      console.warn("フレンドコネクションリスナーエラー:", e);
     }
   }
 }
@@ -466,7 +486,6 @@ window.requestFriend = async function(userName) {
   }
 }
 
-// --- フレンド申請のキャンセル（取り消し）機能 ---
 window.cancelFriendRequest = async function(userName) {
   if (!confirm(`${userName} さんへのフレンド申請を取り消しますか？`)) return;
 
@@ -484,25 +503,38 @@ window.cancelFriendRequest = async function(userName) {
   }
 }
 
+// --- フレンド申請承認（クラウドで双方にフレンド成立を通知） ---
 window.acceptFriend = async function(userName) {
-  if (!friends.includes(userName)) {
-    friends.push(userName);
-    if (!dms[userName]) dms[userName] = [];
-  }
-  
   try {
+    // 1. 自分側のフレンドリストに追加
+    if (!friends.includes(userName)) {
+      friends.push(userName);
+      if (!dms[userName]) dms[userName] = [];
+    }
+
+    // 2. サーバー上の申請データを削除
     const requestId = userName + '_' + userProfile.name;
     await db.collection('friendRequests').doc(requestId).delete();
-  } catch(e) {}
 
-  pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
-  pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
-  
-  saveLocalSettings();
-  addNotification(`${userName} さんとフレンドになりました！🤝`);
-  alert(`${userName} さんのフレンド申請を承認しました！`);
-  openDmListModal();
-  renderTweets();
+    // 3. サーバー上に「フレンド成立コネクション」を保存（これで相手の画面にも即座に反映される）
+    const connectionId = [userProfile.name, userName].sort().join('_');
+    await db.collection('friendConnections').doc(connectionId).set({
+      users: [userProfile.name, userName],
+      time: Date.now()
+    });
+
+    pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
+    pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
+    
+    saveLocalSettings();
+    addNotification(`${userName} さんとフレンドになりました！🤝`);
+    alert(`${userName} さんのフレンド申請を承認しました！`);
+    openDmListModal();
+    renderTweets();
+  } catch (err) {
+    console.error("承認エラー:", err);
+    alert("承認処理に失敗しました。");
+  }
 }
 
 window.rejectFriend = async function(userName) {
@@ -517,9 +549,16 @@ window.rejectFriend = async function(userName) {
   renderTweets();
 }
 
-window.removeFriend = function(userName) {
+window.removeFriend = async function(userName) {
   if (confirm(`${userName} さんをフレンドから削除しますか？`)) {
     friends = friends.filter(f => f !== userName);
+    
+    // サーバー上のコネクションも削除
+    try {
+      const connectionId = [userProfile.name, userName].sort().join('_');
+      await db.collection('friendConnections').doc(connectionId).delete();
+    } catch(e) {}
+
     saveLocalSettings();
     openDmListModal();
     renderTweets();
@@ -888,7 +927,6 @@ function renderTweets() {
       if (isFriend) {
         friendActionHtml = `<span style="font-size: 0.75rem; color: #00b900; font-weight:bold;">✔ フレンド</span>`;
       } else if (isPendingOut) {
-        // 申請中の場合は「取り消し」ボタンを表示
         friendActionHtml = `<button onclick="cancelFriendRequest('${escapeHtml(tweet.name)}')" style="background: rgba(255, 73, 73, 0.15); border: 1px solid #ff4949; color: #ff4949; font-size: 0.75rem; padding: 2px 8px; border-radius: 9999px; cursor: pointer;" title="申請を取り消す">⏳ 取消</button>`;
       } else {
         friendActionHtml = `<button onclick="requestFriend('${escapeHtml(tweet.name)}')" style="background: rgba(29, 155, 240, 0.15); border: 1px solid var(--accent-color); color: var(--accent-color); font-size: 0.75rem; padding: 2px 8px; border-radius: 9999px; cursor: pointer;">✉️ 申請</button>`;
