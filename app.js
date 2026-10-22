@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - Firebase リアルタイム同期＆動画制限版
+// 平和 (Peaceful Board) - Firebase リアルタイム同期＆サイズ制限・クリア対応版
 // ==========================================
 
 // Firebase 初期化
@@ -629,7 +629,7 @@ window.translateTweet = async function(tweetId) {
   renderTweets();
 }
 
-// --- メディア（画像・動画）選択時の処理（1分超えの動画を拒否） ---
+// --- メディア（画像・動画）選択時の処理（1分超え＆大きすぎる動画を拒否） ---
 const mediaInput = document.getElementById('mediaInput') || document.getElementById('imageInput');
 const imagePreviewContainer = document.getElementById('imagePreviewContainer');
 const previewWrapper = document.getElementById('previewWrapper');
@@ -641,6 +641,13 @@ if (mediaInput) {
     if (!file) return;
 
     if (file.type.startsWith('video/')) {
+      // ファイルサイズチェック (約1MB = 1048576 バイトを超える場合はFirestoreに保存できないため弾く)
+      if (file.size > 1500000) {
+        alert("⚠️ 動画のファイルサイズが大きすぎます。\nFirestoreの制限のため、1MB以下の軽い動画（または短めの動画）を選んでください。");
+        mediaInput.value = '';
+        return;
+      }
+
       const video = document.createElement('video');
       video.preload = 'metadata';
       video.src = URL.createObjectURL(file);
@@ -951,6 +958,8 @@ if (tweetForm) {
 
     try {
       await db.collection('tweets').doc(String(newTweet.id)).set(newTweet);
+      
+      // --- 投稿成功時にテキスト欄とプレビューを空にする（クリア） ---
       tweetText.value = '';
       currentMediaBase64 = '';
       if (mediaInput) mediaInput.value = '';
@@ -966,7 +975,7 @@ if (tweetForm) {
       }
     } catch (err) {
       console.error("投稿エラー: ", err);
-      alert("投稿に失敗しました。");
+      alert("動画のファイルサイズが大きすぎるため投稿できませんでした。もっと短い動画または軽い画像をお試しください。");
     }
   });
 }
