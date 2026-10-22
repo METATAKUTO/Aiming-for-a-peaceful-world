@@ -504,17 +504,17 @@
           <form id="tweetForm">
             <textarea id="tweetText" class="tweet-textarea" placeholder="いまどんな気持ち？平和な日常をつぶやこう..." required></textarea>
             
-            <!-- プレビューエリア（画像＆動画対応） -->
+            <!-- プレビューエリア（画像・GIF対応） -->
             <div id="imagePreviewContainer" style="display: none; margin-bottom: 12px; position: relative; max-width: 100%;">
               <div id="previewWrapper"></div>
               <button type="button" id="removeImageBtn" style="position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,0.7); color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; font-weight: bold;">✕</button>
             </div>
 
             <div class="tweet-box-footer">
-              <!-- 画像・動画選択ボタン (1分自動カット対応) -->
-              <input type="file" id="mediaInput" accept="image/*,video/*" style="display: none;">
+              <!-- 画像・GIF選択ボタン -->
+              <input type="file" id="mediaInput" accept="image/*" style="display: none;">
               <button type="button" onclick="document.getElementById('mediaInput').click()" style="background: transparent; border: 1px solid var(--border-color); color: var(--accent-color); padding: 6px 14px; border-radius: 9999px; cursor: pointer; font-size: 0.85rem; font-weight: bold; display: flex; align-items: center; gap: 6px;">
-                📷 画像・動画 <span style="font-size: 0.7rem; color: var(--text-secondary);">(1分自動カット)</span>
+                📷 画像・GIFを追加
               </button>
               
               <button type="submit" class="post-submit-btn">ポストする</button>
