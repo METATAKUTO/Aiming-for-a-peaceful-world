@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - DM完全同期・高速リロール版
+// 平和 (Peaceful Board) - DM完全一致・リアルタイム同期版
 // ==========================================
 
 // Firebase 初期化
@@ -47,6 +47,7 @@ let currentFilterMode = 'all';
 let notifications = JSON.parse(localStorage.getItem('peace_notifications')) || [];
 let currentChatFriend = null;
 let currentMediaBase64 = '';
+let activeDmUnsubscribe = null; // DM個別リスナーの解除用
 
 const sideAvatar = document.getElementById('sideAvatar');
 const sideName = document.getElementById('sideName');
@@ -169,25 +170,6 @@ function initRealtimeSync() {
       }, (e) => console.warn("コネクションリスナーエラー:", e));
     } catch (e) {
       console.warn("フレンドコネクションリスナーエラー:", e);
-    }
-
-    // 4. DMチャットのリアルタイム同期（超強力リアルタイムリスナー）
-    try {
-      db.collection('dmRooms').where('users', 'array-contains', userProfile.name).onSnapshot((snapshot) => {
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          if (data && data.messages && data.users) {
-            // 相手の名前を特定
-            const peer = data.users.find(u => u !== userProfile.name) || data.friendPair;
-            if (peer) {
-              dms[peer] = data.messages;
-            }
-          }
-        });
-        rerollUpdate();
-      }, (e) => console.warn("DM同期リスナーエラー:", e));
-    } catch (e) {
-      console.warn("DMリスナーエラー:", e);
     }
   }
 }
@@ -418,6 +400,11 @@ window.openNotificationsModal = function() {
 window.closeModal = function(id) {
   const modal = document.getElementById(id);
   if (modal) modal.style.display = 'none';
+  if (id === 'chatModal' && activeDmUnsubscribe) {
+    activeDmUnsubscribe(); // チャットを閉じたらリスナーを解除
+    activeDmUnsubscribe = null;
+    currentChatFriend = null;
+  }
   rerollUpdate();
 }
 
@@ -727,6 +714,7 @@ window.openDmListModal = function() {
   `;
 }
 
+// --- 個別チャットルームを開いたときの専用リアルタイム監視（確実同期） ---
 window.openChat = function(friendName) {
   closeModal('dmListModal');
   currentChatFriend = friendName;
@@ -740,6 +728,32 @@ window.openChat = function(friendName) {
     document.body.appendChild(chatModal);
   }
   chatModal.style.display = 'flex';
+
+  // 以前のリスナーが残っていれば解除
+  if (activeDmUnsubscribe) {
+    activeDmUnsubscribe();
+    activeDmUnsubscribe = null;
+  }
+
+  // 2人の名前を必ずアルファベット順等で統一して同じIDを生成（すれ違い防止）
+  const roomId = [userProfile.name, friendName].sort().join('_');
+
+  // このチャットルーム専用のリアルタイムリスナーを開始
+  activeDmUnsubscribe = db.collection('dmRooms').doc(roomId).onSnapshot((doc) => {
+    if (doc.exists) {
+      const data = doc.data();
+      if (data && data.messages) {
+        dms[friendName] = data.messages;
+        renderChatContent();
+      }
+    } else {
+      dms[friendName] = [];
+      renderChatContent();
+    }
+  }, (err) => {
+    console.warn("個別DM同期エラー:", err);
+  });
+
   renderChatContent();
   rerollUpdate();
 }
@@ -787,7 +801,7 @@ function renderChatContent() {
   if (msgBox) msgBox.scrollTop = msgBox.scrollHeight;
 }
 
-// --- クラウドリアルタイムDM送信機能 ---
+// --- クラウドリアルタイムDM送信機能（ID完全統一版） ---
 window.sendDmMessage = async function(e) {
   e.preventDefault();
   const input = document.getElementById('dmInput');
@@ -800,8 +814,9 @@ window.sendDmMessage = async function(e) {
   dms[currentChatFriend].push({ sender: userProfile.name, text, time: timeStr });
 
   try {
-    const friendPairKey = [userProfile.name, currentChatFriend].sort().join('_');
-    await db.collection('dmRooms').doc(friendPairKey).set({
+    // 2人の名前を文字列順でソートしてIDにするため、どちらの端末から開いても100%同じルームに書き込まれます
+    const roomId = [userProfile.name, currentChatFriend].sort().join('_');
+    await db.collection('dmRooms').doc(roomId).set({
       friendPair: currentChatFriend,
       users: [userProfile.name, currentChatFriend],
       messages: dms[currentChatFriend],
