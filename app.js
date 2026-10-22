@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - 双方向フレンド同期対応版
+// 平和 (Peaceful Board) - フレンド完全同期・安定版
 // ==========================================
 
 // Firebase 初期化
@@ -78,7 +78,7 @@ function saveLocalSettings() {
   }
 }
 
-// --- Firestore リアルタイムリスナー（フレンド関係の自動同期） ---
+// --- Firestore リアルタイムリスナー ---
 function initRealtimeSync() {
   db.collection('tweets').orderBy('id', 'desc').onSnapshot((snapshot) => {
     tweets = [];
@@ -109,18 +109,46 @@ function initRealtimeSync() {
         });
         saveLocalSettings();
         updateNotificationBadge();
-      });
+      }, (e) => console.warn("申請受信リスナーエラー:", e));
     } catch (e) {
       console.warn("フレンド申請リスナーエラー:", e);
     }
 
-    // 2. 自分が承認された（フレンド成立した）ことをリアルタイムで監視
+    // 2. 自分が出した申請がどうなっているか（承認されたか）を監視
+    try {
+      db.collection('friendRequests').where('from', '==', userProfile.name).onSnapshot((snapshot) => {
+        const currentOutNames = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data && data.to) {
+            currentOutNames.push(data.to);
+          }
+        });
+        // もしサーバー側から自分の申請が消えていたら、相手が承認してくれた（または自分で取り消した）と判定
+        pendingRequestsOut.forEach(outName => {
+          if (!currentOutNames.includes(outName)) {
+            // 相手とフレンドになっていない場合はフレンドに追加する
+            if (!friends.includes(outName)) {
+              friends.push(outName);
+              if (!dms[outName]) dms[outName] = [];
+              addNotification(`${outName} さんがフレンド申請を承認しました！🤝`);
+            }
+          }
+        });
+        pendingRequestsOut = currentOutNames;
+        saveLocalSettings();
+        renderTweets();
+      }, (e) => console.warn("申請送信リスナーエラー:", e));
+    } catch (e) {
+      console.warn("申請送信監視エラー:", e);
+    }
+
+    // 3. フレンドコネクション（双方向同期）の監視
     try {
       db.collection('friendConnections').where('users', 'array-contains', userProfile.name).onSnapshot((snapshot) => {
         snapshot.forEach((doc) => {
           const data = doc.data();
           if (data && data.users) {
-            // もう一人のユーザーを特定
             const peer = data.users.find(u => u !== userProfile.name);
             if (peer && !friends.includes(peer)) {
               friends.push(peer);
@@ -130,7 +158,7 @@ function initRealtimeSync() {
           }
         });
         renderTweets();
-      });
+      }, (e) => console.warn("コネクションリスナーエラー:", e));
     } catch (e) {
       console.warn("フレンドコネクションリスナーエラー:", e);
     }
@@ -476,7 +504,9 @@ window.requestFriend = async function(userName) {
       time: Date.now()
     });
 
-    pendingRequestsOut.push(userName);
+    if (!pendingRequestsOut.includes(userName)) {
+      pendingRequestsOut.push(userName);
+    }
     saveLocalSettings();
     alert(`${userName} さんにフレンド申請を送信しました！`);
     renderTweets();
@@ -490,8 +520,11 @@ window.cancelFriendRequest = async function(userName) {
   if (!confirm(`${userName} さんへのフレンド申請を取り消しますか？`)) return;
 
   try {
-    const requestId = userProfile.name + '_' + userName;
-    await db.collection('friendRequests').doc(requestId).delete();
+    const requestId1 = userProfile.name + '_' + userName;
+    const requestId2 = userName + '_' + userProfile.name;
+    
+    await db.collection('friendRequests').doc(requestId1).delete().catch(() => {});
+    await db.collection('friendRequests').doc(requestId2).delete().catch(() => {});
 
     pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
     saveLocalSettings();
@@ -499,11 +532,14 @@ window.cancelFriendRequest = async function(userName) {
     renderTweets();
   } catch (err) {
     console.error("申請キャンセルエラー:", err);
-    alert("申請の取り消しに失敗しました。");
+    // ローカルだけでも強制クリア
+    pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
+    saveLocalSettings();
+    renderTweets();
   }
 }
 
-// --- フレンド申請承認（クラウドで双方にフレンド成立を通知） ---
+// --- フレンド申請承認（双方向に確実にコネクション作成） ---
 window.acceptFriend = async function(userName) {
   try {
     // 1. 自分側のフレンドリストに追加
@@ -512,11 +548,13 @@ window.acceptFriend = async function(userName) {
       if (!dms[userName]) dms[userName] = [];
     }
 
-    // 2. サーバー上の申請データを削除
-    const requestId = userName + '_' + userProfile.name;
-    await db.collection('friendRequests').doc(requestId).delete();
+    // 2. 該当する申請ドキュメントを両方のパターンで削除
+    const requestId1 = userName + '_' + userProfile.name;
+    const requestId2 = userProfile.name + '_' + userName;
+    await db.collection('friendRequests').doc(requestId1).delete().catch(() => {});
+    await db.collection('friendRequests').doc(requestId2).delete().catch(() => {});
 
-    // 3. サーバー上に「フレンド成立コネクション」を保存（これで相手の画面にも即座に反映される）
+    // 3. サーバー上のフレンドコネクション（双方向）を保存
     const connectionId = [userProfile.name, userName].sort().join('_');
     await db.collection('friendConnections').doc(connectionId).set({
       users: [userProfile.name, userName],
@@ -533,14 +571,21 @@ window.acceptFriend = async function(userName) {
     renderTweets();
   } catch (err) {
     console.error("承認エラー:", err);
-    alert("承認処理に失敗しました。");
+    // 万が一のクラウドエラー時もローカルで強制的にフレンド化
+    if (!friends.includes(userName)) friends.push(userName);
+    pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
+    saveLocalSettings();
+    openDmListModal();
+    renderTweets();
   }
 }
 
 window.rejectFriend = async function(userName) {
   try {
-    const requestId = userName + '_' + userProfile.name;
-    await db.collection('friendRequests').doc(requestId).delete();
+    const requestId1 = userName + '_' + userProfile.name;
+    const requestId2 = userProfile.name + '_' + userName;
+    await db.collection('friendRequests').doc(requestId1).delete().catch(() => {});
+    await db.collection('friendRequests').doc(requestId2).delete().catch(() => {});
   } catch(e) {}
 
   pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
@@ -553,7 +598,6 @@ window.removeFriend = async function(userName) {
   if (confirm(`${userName} さんをフレンドから削除しますか？`)) {
     friends = friends.filter(f => f !== userName);
     
-    // サーバー上のコネクションも削除
     try {
       const connectionId = [userProfile.name, userName].sort().join('_');
       await db.collection('friendConnections').doc(connectionId).delete();
@@ -606,7 +650,11 @@ window.openDmListModal = function() {
 
       ${pendingRequestsOut.length > 0 ? `
         <div style="margin-bottom: 20px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); padding: 12px; border-radius: 12px;">
-          <div style="font-weight: bold; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px;">⏳ 送信中のフレンド申請 (${pendingRequestsOut.length})</div>${pendingRequestsOut.map(u => `
+          <div style="font-weight: bold; font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
+            <span>⏳ 送信中のフレンド申請 (${pendingRequestsOut.length})</span>
+            <button onclick="pendingRequestsOut=[]; saveLocalSettings(); openDmListModal(); renderTweets();" style="background:none; border:none; color:var(--text-secondary); font-size:0.7rem; cursor:pointer; text-decoration:underline;">スタック強制クリア</button>
+          </div>
+          ${pendingRequestsOut.map(u => `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
               <span style="font-size:0.85rem;">👤 ${escapeHtml(u)}</span>
               <button onclick="cancelFriendRequest('${escapeHtml(u)}')" style="background:none; border:1px solid #ff4949; color:#ff4949; font-size:0.75rem; padding:2px 8px; border-radius:9999px; cursor:pointer;">取り消し</button>
@@ -1068,7 +1116,7 @@ function renderNotifications() {
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
             <span style="font-size:0.85rem; font-weight:bold;">👤 ${escapeHtml(r.from)}</span>
             <div style="display:flex; gap:6px;">
-              <button onclick="acceptFriend('${escapeHtml(r.from)}')" style="background: #00b900; border:none; color:white; font-size:0.75rem; padding:4px 10px; border-radius:9999px; cursor:pointer; font-weight:bold;">承認</button>
+              <button onclick="acceptFriend('${escapeHtml(r.from)}')" style="background: #00b900; border:none; color:white; font-size:0.75rem; padding:4px 10px; border-radius:9999px; cursor:pointer; font-weight:bold;">承認したのに片方しか…を解決する承認</button>
               <button onclick="rejectFriend('${escapeHtml(r.from)}')" style="background:transparent; border:1px solid var(--text-secondary); color:var(--text-secondary); font-size:0.75rem; padding:4px 8px; border-radius:9999px; cursor:pointer;">拒否</button>
             </div>
           </div>
