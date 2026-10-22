@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - Firebase リアルタイム同期＆規約・削除対応版
+// 平和 (Peaceful Board) - Firebase リアルタイム同期＆動画対応版
 // ==========================================
 
 // Firebase 初期化
@@ -33,10 +33,10 @@ let dms = JSON.parse(localStorage.getItem('peace_dms')) || {};
 
 let tweets = [];
 let searchQuery = '';
-let currentFilterMode = 'all';
+let currentFilterMode = 'all'; // 'all', 'bookmarks', 'my_posts'
 let notifications = [];
 let currentChatFriend = null;
-let currentImageBase64 = '';
+let currentMediaBase64 = ''; // 画像または動画のデータ
 
 const sideAvatar = document.getElementById('sideAvatar');
 const sideName = document.getElementById('sideName');
@@ -241,8 +241,11 @@ window.closeModal = function(id) {
   if (modal) modal.style.display = 'none';
 }
 
+// フィルター切り替え: ブックマーク
 window.toggleBookmarkView = function() {
   const btn = document.getElementById('bookmarkNavBtn');
+  const myPostsBtn = document.getElementById('myPostsNavBtn');
+
   if (currentFilterMode === 'bookmarks') {
     currentFilterMode = 'all';
     btn.style.borderColor = 'var(--border-color)';
@@ -251,6 +254,31 @@ window.toggleBookmarkView = function() {
     currentFilterMode = 'bookmarks';
     btn.style.borderColor = 'var(--accent-color)';
     btn.style.color = 'var(--accent-color)';
+    if (myPostsBtn) {
+      myPostsBtn.style.borderColor = 'var(--border-color)';
+      myPostsBtn.style.color = 'var(--text-primary)';
+    }
+  }
+  renderTweets();
+}
+
+// フィルター切り替え: 自分の投稿
+window.toggleMyPostsView = function() {
+  const btn = document.getElementById('myPostsNavBtn');
+  const bookmarkBtn = document.getElementById('bookmarkNavBtn');
+
+  if (currentFilterMode === 'my_posts') {
+    currentFilterMode = 'all';
+    btn.style.borderColor = 'var(--border-color)';
+    btn.style.color = 'var(--text-primary)';
+  } else {
+    currentFilterMode = 'my_posts';
+    btn.style.borderColor = 'var(--accent-color)';
+    btn.style.color = 'var(--accent-color)';
+    if (bookmarkBtn) {
+      bookmarkBtn.style.borderColor = 'var(--border-color)';
+      bookmarkBtn.style.color = 'var(--text-primary)';
+    }
   }
   renderTweets();
 }
@@ -601,29 +629,100 @@ window.translateTweet = async function(tweetId) {
   renderTweets();
 }
 
-const imageInput = document.getElementById('imageInput');
+// --- 動画を1分以内に自動トリミングする関数 ---
+async function processVideoFile(file) {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.src = URL.createObjectURL(file);
+
+    video.onloadedmetadata = function() {
+      window.URL.revokeObjectURL(video.src);
+      
+      if (video.duration <= 60) {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      alert(`⚠️ 選択された動画が1分（${Math.floor(video.duration)}秒）を超えているため、最初の1分間に自動トリミングします！`);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 360;
+      const ctx = canvas.getContext('2d');
+
+      const stream = canvas.captureStream(30);
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      const chunks = [];
+
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.readAsDataURL(blob);
+      };
+
+      video.currentTime = 0;
+      video.muted = true;
+      video.play();
+      recorder.start();
+
+      const drawTimer = setInterval(() => {
+        if (video.currentTime >= 60 || video.ended) {
+          video.pause();
+          recorder.stop();
+          clearInterval(drawTimer);
+        } else {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        }
+      }, 1000 / 30);
+    };
+  });
+}
+
+// --- メディア（画像・動画）選択時の処理 ---
+const mediaInput = document.getElementById('mediaInput') || document.getElementById('imageInput');
 const imagePreviewContainer = document.getElementById('imagePreviewContainer');
-const imagePreview = document.getElementById('imagePreview');
+const previewWrapper = document.getElementById('previewWrapper');
 const removeImageBtn = document.getElementById('removeImageBtn');
 
-imageInput.addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (file) {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      currentImageBase64 = event.target.result;
-      imagePreview.src = currentImageBase64;
-      imagePreviewContainer.style.display = 'block';
-    };
-    reader.readAsDataURL(file);
-  }
-});
+if (mediaInput) {
+  mediaInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-removeImageBtn.addEventListener('click', () => {
-  currentImageBase64 = '';
-  imageInput.value = '';
-  imagePreviewContainer.style.display = 'none';
-});
+    if (file.type.startsWith('video/')) {
+      alert('動画を読み込んでいます。少々お待ちください...');
+      currentMediaBase64 = await processVideoFile(file);
+      if (previewWrapper) {
+        previewWrapper.innerHTML = `<video src="${currentMediaBase64}" controls style="width: 100%; max-height: 200px; border-radius: 8px;"></video>`;
+      }
+      if (imagePreviewContainer) imagePreviewContainer.style.display = 'block';
+    } else if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        currentMediaBase64 = event.target.result;
+        if (previewWrapper) {
+          previewWrapper.innerHTML = `<img src="${currentMediaBase64}" alt="プレビュー" style="width: 100%; max-height: 200px; border-radius: 8px; object-fit: cover;">`;
+        }
+        if (imagePreviewContainer) imagePreviewContainer.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    }
+  });
+}
+
+if (removeImageBtn) {
+  removeImageBtn.addEventListener('click', () => {
+    currentMediaBase64 = '';
+    if (mediaInput) mediaInput.value = '';
+    if (previewWrapper) previewWrapper.innerHTML = '';
+    if (imagePreviewContainer) imagePreviewContainer.style.display = 'none';
+  });
+}
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -645,13 +744,16 @@ function renderTweets() {
   const filteredTweets = tweets.filter(t => {
     if (blockedUsers.includes(t.name)) return false;
     if (currentFilterMode === 'bookmarks' && !bookmarks.includes(t.id)) return false;
+    if (currentFilterMode === 'my_posts' && t.name !== userProfile.name) return false;
     if (!searchQuery) return true;
     const fullText = (t.name + ' ' + t.text).toLowerCase();
     return fullText.includes(searchQuery);
   });
 
   if (filteredTweets.length === 0) {
-    const msg = currentFilterMode === 'bookmarks' ? 'ブックマークした投稿はありません 🔖' : '該当する投稿はありません';
+    let msg = '該当する投稿はありません';
+    if (currentFilterMode === 'bookmarks') msg = 'ブックマークした投稿はありません 🔖';
+    if (currentFilterMode === 'my_posts') msg = 'あなたの投稿はまだありません 👤';
     tweetList.innerHTML = `<p style="color: var(--text-secondary); text-align: center; padding: 40px;">${msg}</p>`;
     return;
   }
@@ -667,7 +769,6 @@ function renderTweets() {
       ? window.getPeerCurrentTime(tweet.lang || 'en') 
       : (tweet.time || '');
 
-    // 条件分岐を変数として安全に組み立てる
     let friendActionHtml = '';
     if (!isMyTweet) {
       if (isFriend) {
@@ -686,6 +787,17 @@ function renderTweets() {
     let blockBtnHtml = !isMyTweet 
       ? `<button onclick="blockUser('${escapeHtml(tweet.name)}')" style="background:none; border:none; color:var(--text-secondary); font-size:0.75rem; cursor:pointer;" title="ブロック">🚫</button>` 
       : '';
+
+    // メディア（画像か動画かを自動判別）
+    let mediaHtml = '';
+    if (tweet.imageUrl) {
+      const isVideo = tweet.imageUrl.startsWith('data:video/') || tweet.imageUrl.includes('.webm') || tweet.imageUrl.includes('.mp4');
+      if (isVideo) {
+        mediaHtml = `<video src="${tweet.imageUrl}" class="tweet-image" controls style="width: 100%; max-height: 350px; border-radius: 12px; object-fit: cover; margin-top: 8px;"></video>`;
+      } else {
+        mediaHtml = `<img src="${tweet.imageUrl}" class="tweet-image" alt="添付画像" style="width: 100%; max-height: 350px; border-radius: 12px; object-fit: cover; margin-top: 8px;">`;
+      }
+    }
 
     const card = document.createElement('article');
     card.className = 'tweet-card';
@@ -722,9 +834,9 @@ function renderTweets() {
           </div>
         ` : ''}
 
-        ${tweet.imageUrl ? `<img src="${tweet.imageUrl}" class="tweet-image" alt="添付画像">` : ''}
+        ${mediaHtml}
         
-        <div style="display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 6px; margin: 8px 0; flex-wrap: wrap;">
           <button onclick="toggleReaction(${tweet.id}, 'thanks')" style="background: ${tweet.userReaction === 'thanks' ? 'rgba(249, 24, 128, 0.2)' : 'rgba(255,255,255,0.04)'}; border: 1px solid ${tweet.userReaction === 'thanks' ? 'var(--pink-color)' : 'var(--border-color)'}; color: var(--text-primary); font-size: 0.75rem; padding: 3px 8px; border-radius: 9999px; cursor: pointer;">
             🌸 感謝 ${r.thanks ? r.thanks : ''}
           </button>
@@ -866,7 +978,7 @@ if (tweetForm) {
       lang: userProfile.lang,
       flag: userProfile.flag,
       time: timeStr,
-      imageUrl: currentImageBase64,
+      imageUrl: currentMediaBase64, // 画像または動画データ
       likes: 0,
       isLiked: false,
       reactions: { thanks: 0, peace: 0, celebrate: 0, healing: 0 },
@@ -878,8 +990,9 @@ if (tweetForm) {
     try {
       await db.collection('tweets').doc(String(newTweet.id)).set(newTweet);
       tweetText.value = '';
-      currentImageBase64 = '';
-      if (imageInput) imageInput.value = '';
+      currentMediaBase64 = '';
+      if (mediaInput) mediaInput.value = '';
+      if (previewWrapper) previewWrapper.innerHTML = '';
       if (imagePreviewContainer) imagePreviewContainer.style.display = 'none';
 
       if (typeof confetti === 'function') {
