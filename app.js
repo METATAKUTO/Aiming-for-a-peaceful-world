@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - Firebase リアルタイム同期＆サイズ制限・クリア対応版
+// 平和 (Peaceful Board) - Firebase リアルタイム同期＆画像・GIF限定版
 // ==========================================
 
 // Firebase 初期化
@@ -36,7 +36,7 @@ let searchQuery = '';
 let currentFilterMode = 'all'; // 'all', 'bookmarks', 'my_posts'
 let notifications = [];
 let currentChatFriend = null;
-let currentMediaBase64 = ''; // 画像または動画のデータ
+let currentMediaBase64 = ''; // 画像またはGIFのデータ
 
 const sideAvatar = document.getElementById('sideAvatar');
 const sideName = document.getElementById('sideName');
@@ -629,59 +629,40 @@ window.translateTweet = async function(tweetId) {
   renderTweets();
 }
 
-// --- メディア（画像・動画）選択時の処理（1分超え＆大きすぎる動画を拒否） ---
+// --- メディア（画像・GIF）選択時の処理 ---
 const mediaInput = document.getElementById('mediaInput') || document.getElementById('imageInput');
 const imagePreviewContainer = document.getElementById('imagePreviewContainer');
 const previewWrapper = document.getElementById('previewWrapper');
 const removeImageBtn = document.getElementById('removeImageBtn');
 
 if (mediaInput) {
-  mediaInput.addEventListener('change', async (e) => {
+  mediaInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
+    // 動画ファイルが選択された場合は拒否する
     if (file.type.startsWith('video/')) {
-      // ファイルサイズチェック (約1MB = 1048576 バイトを超える場合はFirestoreに保存できないため弾く)
-      if (file.size > 1500000) {
-        alert("⚠️ 動画のファイルサイズが大きすぎます。\nFirestoreの制限のため、1MB以下の軽い動画（または短めの動画）を選んでください。");
-        mediaInput.value = '';
-        return;
-      }
-
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-      video.src = URL.createObjectURL(file);
-
-      video.onloadedmetadata = function() {
-        window.URL.revokeObjectURL(video.src);
-        
-        if (video.duration > 60) {
-          alert(`⚠️ 選択された動画は ${Math.floor(video.duration)}秒 です。\n動画は「1分以内」のものしかアップロードできません。`);
-          mediaInput.value = '';
-          return;
-        }
-
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          currentMediaBase64 = event.target.result;
-          if (previewWrapper) {
-            previewWrapper.innerHTML = `<video src="${currentMediaBase64}" controls style="width: 100%; max-height: 200px; border-radius: 8px;"></video>`;
-          }
-          if (imagePreviewContainer) imagePreviewContainer.style.display = 'block';
-        };
-        reader.readAsDataURL(file);
-      };
-    } else if (file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        currentMediaBase64 = event.target.result;
-        if (previewWrapper) {
-          previewWrapper.innerHTML = `<img src="${currentMediaBase64}" alt="プレビュー" style="width: 100%; max-height: 200px; border-radius: 8px; object-fit: cover;">`;
-        }
-        if (imagePreviewContainer) imagePreviewContainer.style.display = 'block';
-      };
-      reader.readAsDataURL(file);
+      alert("⚠️ 動画のアップロードはできません。\n画像またはGIFアニメーションのみ選択してください。");
+      mediaInput.value = '';
+      return;
     }
+
+    // ファイルサイズチェック (画像・GIFは2MB以下を推奨)
+    if (file.size > 2000000) {
+      alert("⚠️ 画像（またはGIF）のファイルサイズが大きすぎます（2MB以下にしてください）。");
+      mediaInput.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      currentMediaBase64 = event.target.result;
+      if (previewWrapper) {
+        previewWrapper.innerHTML = `<img src="${currentMediaBase64}" alt="プレビュー" style="width: 100%; max-height: 200px; border-radius: 8px; object-fit: cover;">`;
+      }
+      if (imagePreviewContainer) imagePreviewContainer.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
   });
 }
 
@@ -758,15 +739,7 @@ function renderTweets() {
       ? `<button onclick="blockUser('${escapeHtml(tweet.name)}')" style="background:none; border:none; color:var(--text-secondary); font-size:0.75rem; cursor:pointer;" title="ブロック">🚫</button>` 
       : '';
 
-    let mediaHtml = '';
-    if (tweet.imageUrl) {
-      const isVideo = tweet.imageUrl.startsWith('data:video/') || tweet.imageUrl.includes('.webm') || tweet.imageUrl.includes('.mp4');
-      if (isVideo) {
-        mediaHtml = `<video src="${tweet.imageUrl}" class="tweet-image" controls style="width: 100%; max-height: 350px; border-radius: 12px; object-fit: cover; margin-top: 8px;"></video>`;
-      } else {
-        mediaHtml = `<img src="${tweet.imageUrl}" class="tweet-image" alt="添付画像" style="width: 100%; max-height: 350px; border-radius: 12px; object-fit: cover; margin-top: 8px;">`;
-      }
-    }
+    let mediaHtml = tweet.imageUrl ? `<img src="${tweet.imageUrl}" class="tweet-image" alt="添付画像" style="width: 100%; max-height: 350px; border-radius: 12px; object-fit: cover; margin-top: 8px;">` : '';
 
     const card = document.createElement('article');
     card.className = 'tweet-card';
@@ -975,7 +948,7 @@ if (tweetForm) {
       }
     } catch (err) {
       console.error("投稿エラー: ", err);
-      alert("動画のファイルサイズが大きすぎるため投稿できませんでした。もっと短い動画または軽い画像をお試しください。");
+      alert("画像のファイルサイズが大きすぎるため投稿できませんでした。もっと軽い画像をお試しください。");
     }
   });
 }
