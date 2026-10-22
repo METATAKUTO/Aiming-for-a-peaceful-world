@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - メニュー折りたたみ＆開閉対応版
+// 平和 (Peaceful Board) - リアルタイムフレンド申請＆スライドメニュー対応版
 // ==========================================
 
 // Firebase 初期化
@@ -16,7 +16,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
-// --- 端末固有のユニークID（デバイスID）の生成・保持 ---
+// --- 端末固有のデバイスID ---
 let deviceId = localStorage.getItem('peace_device_id');
 if (!deviceId) {
   deviceId = 'dev_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -75,8 +75,9 @@ function saveLocalSettings() {
   }
 }
 
-// --- Firestore リアルタイムリスナー ---
+// --- Firestore リアルタイムリスナー（ツイート・ユーザー名・フレンド申請同期） ---
 function initRealtimeSync() {
+  // ツイート同期
   db.collection('tweets').orderBy('id', 'desc').onSnapshot((snapshot) => {
     tweets = [];
     snapshot.forEach((doc) => {
@@ -87,14 +88,28 @@ function initRealtimeSync() {
     console.error("Firestoreツイート同期エラー: ", error);
   });
 
+  // ユーザー名同期
   db.collection('users').onSnapshot((snapshot) => {
     registeredUsers = {};
     snapshot.forEach((doc) => {
       registeredUsers[doc.id] = doc.data().deviceId;
     });
-  }, (error) => {
-    console.error("Firestoreユーザー同期エラー: ", error);
   });
+
+  // フレンド申請のリアルタイム同期（自分の名前に届いた申請を監視）
+  if (userProfile.name) {
+    db.collection('friendRequests').where('to', '==', userProfile.name).onSnapshot((snapshot) => {
+      pendingRequestsIn = [];
+      snapshot.forEach((doc) => {
+        pendingRequestsIn.push(doc.data());
+      });
+      saveLocalSettings();
+      if (pendingRequestsIn.length > 0) {
+        notifBadge.style.display = 'inline-block';
+        notifBadge.textContent = pendingRequestsIn.length;
+      }
+    });
+  }
 }
 
 async function claimUsername(name) {
@@ -193,7 +208,7 @@ function playNotificationSound() {
   }
 }
 
-// --- メニューの折りたたみ開閉機能の注入 ---
+// --- メニューのパーツ＆スライドメニュー開閉制御 ---
 function injectBrandNotice() {
   const brandLogo = document.querySelector('.brand-logo');
   if (brandLogo && !document.getElementById('brandNotice')) {
@@ -205,25 +220,12 @@ function injectBrandNotice() {
   }
 
   const sidebar = document.querySelector('.sidebar-left > div:first-child');
-  if (sidebar && !document.getElementById('menuToggleContainer')) {
-    // 開閉用のトグルボタン（≡ メニュー）
-    const toggleContainer = document.createElement('div');
-    toggleContainer.id = 'menuToggleContainer';
-    toggleContainer.style.cssText = 'margin-bottom: 12px;';
+  if (sidebar && !document.getElementById('sidebarBtnsContainer')) {
+    const container = document.createElement('div');
+    container.id = 'sidebarBtnsContainer';
+    container.style.cssText = 'display:flex; flex-direction:column; gap:8px; margin-top:8px;';
     
-    toggleContainer.innerHTML = `
-      <button onclick="toggleSideMenu()" id="menuToggleBtn" style="background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
-        ≡ メニューを開く
-      </button>
-    `;
-    sidebar.appendChild(toggleContainer);
-
-    // 各種機能ボタンを格納するコンテナ（初期はスマホで非表示、トグルで開閉）
-    const drawerContainer = document.createElement('div');
-    drawerContainer.id = 'sidebarBtnsContainer';
-    drawerContainer.style.cssText = 'display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px;';
-    
-    drawerContainer.innerHTML = `
+    container.innerHTML = `
       <button onclick="toggleTheme()" id="themeToggleBtn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
         ${typeof currentTheme !== 'undefined' && currentTheme === 'light' ? '☀️ ライトモード' : '🌙 ダークモード'}
       </button>
@@ -240,37 +242,32 @@ function injectBrandNotice() {
         ⚠️ ご注意・利用規約
       </button>
     `;
-    sidebar.appendChild(drawerContainer);
+    sidebar.appendChild(container);
+  }
 
-    // スマホ画面（幅768px以下）ではデフォルトで折りたたむ
-    if (window.innerWidth <= 768) {
-      drawerContainer.style.display = 'none';
-    }
+  const closeBtn = document.getElementById('sidebarCloseBtn');
+  if (closeBtn && window.innerWidth <= 768) {
+    closeBtn.style.display = 'block';
   }
 }
 
-// --- メニュー開閉の切り替え処理 ---
 let isMenuOpen = false;
 window.toggleSideMenu = function() {
-  const drawerContainer = document.getElementById('sidebarBtnsContainer');
-  const menuToggleBtn = document.getElementById('menuToggleBtn');
-  if (!drawerContainer) return;
+  const sidebar = document.getElementById('sidebarLeft');
+  const backdrop = document.getElementById('menuBackdrop');
+  if (!sidebar || !backdrop) return;
 
   isMenuOpen = !isMenuOpen;
   if (isMenuOpen) {
-    drawerContainer.style.display = 'flex';
-    menuToggleBtn.textContent = '✕ メニューを閉じる';
-    menuToggleBtn.style.borderColor = 'var(--accent-color)';
-    menuToggleBtn.style.color = 'var(--accent-color)';
+    sidebar.classList.add('open');
+    backdrop.style.display = 'block';
   } else {
-    drawerContainer.style.display = 'none';
-    menuToggleBtn.textContent = '≡ メニューを開く';
-    menuToggleBtn.style.borderColor = 'var(--border-color)';
-    menuToggleBtn.style.color = 'var(--text-primary)';
+    sidebar.classList.remove('open');
+    backdrop.style.display = 'none';
   }
 }
 
-// --- 注意・規約モーダル表示 ---
+// --- 注意・利用規約モーダル ---
 window.openTermsModal = function() {
   let termsModal = document.getElementById('termsModal');
   if (!termsModal) {
@@ -308,7 +305,7 @@ function updateProfileUI() {
   userProfile.flag = langFlags[userProfile.lang] || '🌐';
   
   const langNames = { ja: '日本語', en: '英語', ko: '韓国語', zh: '中国語', es: 'スペイン語', fr: 'フランス語', de: 'ドイツ語' };
-  sideLang.textContent = `${userProfile.flag} ${langNames[userProfile.lang] || userProfile.lang}`;
+  sideLang.textContent = `${userProfile.flag}${langNames[userProfile.lang] || userProfile.lang}`;
   injectBrandNotice();
 
   if (typeof window.applyUI18n === 'function') {
@@ -335,7 +332,6 @@ window.closeModal = function(id) {
   if (modal) modal.style.display = 'none';
 }
 
-// フィルター切り替え: ブックマーク
 window.toggleBookmarkView = function() {
   const btn = document.getElementById('bookmarkNavBtn');
   const myPostsBtn = document.getElementById('myPostsNavBtn');
@@ -356,7 +352,6 @@ window.toggleBookmarkView = function() {
   renderTweets();
 }
 
-// フィルター切り替え: 自分の投稿
 window.toggleMyPostsView = function() {
   const btn = document.getElementById('myPostsNavBtn');
   const bookmarkBtn = document.getElementById('bookmarkNavBtn');
@@ -391,7 +386,6 @@ async function updateTweetInFirestore(tweet) {
   await db.collection('tweets').doc(String(tweet.id)).set(tweet);
 }
 
-// --- 投稿削除機能 ---
 window.deleteTweet = async function(tweetId, tweetDeviceId) {
   if (tweetDeviceId && tweetDeviceId !== deviceId) {
     alert("❌ この投稿は他のユーザーの投稿であるため削除できません。");
@@ -429,13 +423,14 @@ window.toggleReaction = async function(tweetId, stampKey) {
   await updateTweetInFirestore(tweet);
 }
 
-window.requestFriend = function(userName) {
+// --- フレンド申請（Firestoreクラウド送信対応） ---
+window.requestFriend = async function(userName) {
   if (userName === userProfile.name) {
     alert("自分自身にフレンド申請は送れません。");
     return;
   }
   if (friends.includes(userName)) {
-    alert(`${userName} さんとは既にフレンドです。`);
+    alert(`${userName} さんとは既にフレンドです。");
     return;
   }
   if (pendingRequestsOut.includes(userName)) {
@@ -443,17 +438,36 @@ window.requestFriend = function(userName) {
     return;
   }
 
-  pendingRequestsOut.push(userName);
-  saveLocalSettings();
-  alert(`${userName} さんにフレンド申請を送信しました！`);
-  renderTweets();
+  try {
+    const requestId = userProfile.name + '_' + userName;
+    await db.collection('friendRequests').doc(requestId).set({
+      from: userProfile.name,
+      to: userName,
+      time: Date.now()
+    });
+
+    pendingRequestsOut.push(userName);
+    saveLocalSettings();
+    alert(`${userName} さんにフレンド申請を送信しました！`);
+    renderTweets();
+  } catch (err) {
+    console.error("フレンド申請エラー:", err);
+    alert("フレンド申請の送信に失敗しました。");
+  }
 }
 
-window.acceptFriend = function(userName) {
+window.acceptFriend = async function(userName) {
   if (!friends.includes(userName)) {
     friends.push(userName);
     if (!dms[userName]) dms[userName] = [];
   }
+  
+  // サーバー上の申請データを削除
+  try {
+    const requestId = userName + '_' + userProfile.name;
+    await db.collection('friendRequests').doc(requestId).delete();
+  } catch(e) {}
+
   pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
   pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
   
@@ -464,7 +478,12 @@ window.acceptFriend = function(userName) {
   renderTweets();
 }
 
-window.rejectFriend = function(userName) {
+window.rejectFriend = async function(userName) {
+  try {
+    const requestId = userName + '_' + userProfile.name;
+    await db.collection('friendRequests').doc(requestId).delete();
+  } catch(e) {}
+
   pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
   saveLocalSettings();
   openDmListModal();
