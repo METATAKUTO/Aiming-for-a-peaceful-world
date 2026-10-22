@@ -1,0 +1,903 @@
+// ==========================================
+// 平和 (Peaceful Board) - Firebase リアルタイム同期＆規約・削除対応版
+// ==========================================
+
+// Firebase 初期化
+const firebaseConfig = {
+  apiKey: "AIzaSyAB5Re2L2mEQ78dF07j57gbGWZIWCMEqBg",
+  authDomain: "sekai-fce79.firebaseapp.com",
+  projectId: "sekai-fce79",
+  storageBucket: "sekai-fce79.firebasestorage.app",
+  messagingSenderId: "954332998111",
+  appId: "1:954332998111:web:90e96fafe26d1ff42f7c6a",
+  measurementId: "G-MEFWT72T5R"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// --- 状態変数 ---
+let userProfile = JSON.parse(localStorage.getItem('peace_profile')) || {
+  name: '',
+  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+  lang: 'ja',
+  flag: '🇯🇵'
+};
+
+let friends = JSON.parse(localStorage.getItem('peace_friends')) || [];
+let pendingRequestsOut = JSON.parse(localStorage.getItem('peace_requests_out')) || [];
+let pendingRequestsIn = JSON.parse(localStorage.getItem('peace_requests_in')) || [];
+let blockedUsers = JSON.parse(localStorage.getItem('peace_blocked')) || [];
+let bookmarks = JSON.parse(localStorage.getItem('peace_bookmarks')) || [];
+let dms = JSON.parse(localStorage.getItem('peace_dms')) || {};
+
+let tweets = [];
+let searchQuery = '';
+let currentFilterMode = 'all';
+let notifications = [];
+let currentChatFriend = null;
+let currentImageBase64 = '';
+
+const sideAvatar = document.getElementById('sideAvatar');
+const sideName = document.getElementById('sideName');
+const sideLang = document.getElementById('sideLang');
+const postAvatar = document.getElementById('postAvatar');
+const profileModal = document.getElementById('profileModal');
+const notificationsModal = document.getElementById('notificationsModal');
+const inputName = document.getElementById('inputName');
+const inputAvatarUrl = document.getElementById('inputAvatarUrl');
+const inputAvatarFile = document.getElementById('inputAvatarFile');
+const inputLang = document.getElementById('inputLang');
+const notifBadge = document.getElementById('notifBadge');
+const searchInput = document.getElementById('searchInput');
+const clearSearchBtn = document.getElementById('clearSearchBtn');
+
+const langFlags = { ja: '🇯🇵', en: '🇺🇸', ko: '🇰🇷', zh: '🇨🇳', es: '🇪🇸', fr: '🇫🇷', de: '🇩🇪' };
+
+function saveLocalSettings() {
+  localStorage.setItem('peace_profile', JSON.stringify(userProfile));
+  localStorage.setItem('peace_friends', JSON.stringify(friends));
+  localStorage.setItem('peace_requests_out', JSON.stringify(pendingRequestsOut));
+  localStorage.setItem('peace_requests_in', JSON.stringify(pendingRequestsIn));
+  localStorage.setItem('peace_blocked', JSON.stringify(blockedUsers));
+  localStorage.setItem('peace_bookmarks', JSON.stringify(bookmarks));
+  localStorage.setItem('peace_dms', JSON.stringify(dms));
+  if (userProfile.name) {
+    localStorage.setItem('peace_username', userProfile.name);
+  }
+}
+
+// --- Firestore リアルタイムリスナー ---
+function initRealtimeSync() {
+  db.collection('tweets').orderBy('id', 'desc').onSnapshot((snapshot) => {
+    tweets = [];
+    snapshot.forEach((doc) => {
+      tweets.push(doc.data());
+    });
+    renderTweets();
+  }, (error) => {
+    console.error("Firestore同期エラー: ", error);
+  });
+}
+
+function checkInitialSetup() {
+  const savedName = localStorage.getItem('peace_username');
+  if (!savedName && !userProfile.name) {
+    const nameInputModal = document.createElement('div');
+    nameInputModal.className = 'modal-overlay';
+    nameInputModal.style.display = 'flex';
+    nameInputModal.style.zIndex = '999';
+    nameInputModal.innerHTML = `
+      <div class="modal-content" style="text-align: center;">
+        <div class="modal-title" style="justify-content: center;">🕊️ 平和な空間へようこそ</div>
+        <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px;">
+          最初のあなたの表示名を入力してください。
+        </p>
+        <input type="text" id="firstUserName" class="form-input" placeholder="例: 平和すき" style="margin-bottom: 16px;" required>
+        <button id="firstUserSubmit" class="modal-submit">はじめる</button>
+      </div>
+    `;
+    document.body.appendChild(nameInputModal);
+
+    document.getElementById('firstUserSubmit').addEventListener('click', () => {
+      const val = document.getElementById('firstUserName').value.trim();
+      if (val) {
+        userProfile.name = val;
+        saveLocalSettings();
+        nameInputModal.remove();
+        updateProfileUI();
+        initRealtimeSync();
+      }
+    });
+  } else {
+    if (savedName) userProfile.name = savedName;
+    updateProfileUI();
+    initRealtimeSync();
+  }
+}
+
+function playNotificationSound() {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15);
+    
+    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+    
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.3);
+  } catch (e) {
+    console.log("通知音エラー", e);
+  }
+}
+
+function injectBrandNotice() {
+  const brandLogo = document.querySelector('.brand-logo');
+  if (brandLogo && !document.getElementById('brandNotice')) {
+    const noticeDiv = document.createElement('div');
+    noticeDiv.id = 'brandNotice';
+    noticeDiv.style.cssText = 'font-size: 0.7rem; color: var(--text-secondary); padding-left: 12px; margin-top: -8px; margin-bottom: 16px; line-height: 1.3;';
+    noticeDiv.innerHTML = '⚠️ 誹謗中傷や争いを避け、優しさと笑顔の共有をお願いします。';
+    brandLogo.after(noticeDiv);
+  }
+
+  const sidebar = document.querySelector('.sidebar-left > div:first-child');
+  if (sidebar && !document.getElementById('sidebarBtnsContainer')) {
+    const container = document.createElement('div');
+    container.id = 'sidebarBtnsContainer';
+    container.style.cssText = 'display:flex; flex-direction:column; gap:8px; margin-top:8px;';
+    
+    container.innerHTML = `
+      <button onclick="toggleTheme()" id="themeToggleBtn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        ${typeof currentTheme !== 'undefined' && currentTheme === 'light' ? '☀️ ライトモード' : '🌙 ダークモード'}
+      </button>
+      <button onclick="toggleBookmarkView()" id="bookmarkNavBtn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        🔖 ブックマーク一覧
+      </button>
+      <button onclick="toggleMyPostsView()" id="myPostsNavBtn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        👤 自分の投稿
+      </button>
+      <button onclick="openDmListModal()" id="sidebarDmBtn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        💬 フレンドDM
+      </button>
+      <button onclick="openTermsModal()" id="sidebarTermsBtn" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-secondary); width: 100%; padding: 8px; border-radius: 9999px; cursor: pointer; font-weight: bold; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; gap: 8px;">
+        ⚠️ ご注意・利用規約
+      </button>
+    `;
+    sidebar.appendChild(container);
+  }
+}
+
+// --- 注意・規約モーダル表示 ---
+window.openTermsModal = function() {
+  let termsModal = document.getElementById('termsModal');
+  if (!termsModal) {
+    termsModal = document.createElement('div');
+    termsModal.id = 'termsModal';
+    termsModal.className = 'modal-overlay';
+    document.body.appendChild(termsModal);
+  }
+  termsModal.style.display = 'flex';
+  
+  termsModal.innerHTML = `
+    <div class="modal-content" style="max-width: 450px; max-height: 85vh; overflow-y: auto;">
+      <div class="modal-title" style="justify-content: center;">🕊️ ご注意・利用規約</div>
+      <div style="color: var(--text-primary); font-size: 0.9rem; line-height: 1.7; margin: 16px 0; text-align: left; background: rgba(255,255,255,0.03); padding: 16px; border-radius: 12px; border: 1px solid var(--border-color);">
+        <p style="margin-bottom: 12px; font-weight: bold; color: var(--accent-color);">📋 ご利用について</p>
+        <p style="margin-bottom: 8px;">• 投稿は無制限に行っていただけますが、企業様や商業広告などの営利目的でのご利用は固くお断りいたします。</p>
+        <p style="margin-bottom: 16px;">• 本サービスは完全個人でのみのご使用となります。</p>
+
+        <p style="margin-bottom: 12px; font-weight: bold; color: var(--pink-color);">🚫 禁止事項について</p>
+        <p style="margin-bottom: 8px;">• 政治的な話題、思想の主張、および特定の人物・団体への批判や攻撃は絶対にしないでください。</p>
+        <p style="margin-bottom: 16px;">• 誹謗中傷、争いを生む発言、公序良俗に反する内容は一切禁止です。</p>
+
+        <p style="margin-bottom: 8px; font-weight: bold; color: #00b900;">✨ 平和な空間づくりのために</p>
+        <p>当プラットフォームは、世界中の人々が優しさ、笑顔、日常の美しい瞬間を安心して分かち合うための場所です。お互いを思いやり、温かいコミュニケーションを心がけて楽しくご利用ください。</p>
+      </div>
+      <button onclick="closeModal('termsModal')" class="modal-submit" style="width: 100%;">同意して閉じる</button>
+    </div>
+  `;
+}
+
+function updateProfileUI() {
+  sideAvatar.src = userProfile.avatar;
+  postAvatar.src = userProfile.avatar;
+  sideName.textContent = userProfile.name;
+  userProfile.flag = langFlags[userProfile.lang] || '🌐';
+  
+  const langNames = { ja: '日本語', en: '英語', ko: '韓国語', zh: '中国語', es: 'スペイン語', fr: 'フランス語', de: 'ドイツ語' };
+  sideLang.textContent = `${userProfile.flag} ${langNames[userProfile.lang] || userProfile.lang}`;
+  injectBrandNotice();
+
+  if (typeof window.applyUI18n === 'function') {
+    window.applyUI18n(userProfile.lang);
+  }
+}
+
+window.openProfileModal = function() {
+  inputName.value = userProfile.name;
+  inputAvatarUrl.value = userProfile.avatar;
+  inputLang.value = userProfile.lang;
+  profileModal.style.display = 'flex';
+}
+
+window.openNotificationsModal = function() {
+  notificationsModal.style.display = 'flex';
+  renderNotifications();
+  notifBadge.style.display = 'none';
+  notifBadge.textContent = '0';
+}
+
+window.closeModal = function(id) {
+  const modal = document.getElementById(id);
+  if (modal) modal.style.display = 'none';
+}
+
+window.toggleBookmarkView = function() {
+  const btn = document.getElementById('bookmarkNavBtn');
+  if (currentFilterMode === 'bookmarks') {
+    currentFilterMode = 'all';
+    btn.style.borderColor = 'var(--border-color)';
+    btn.style.color = 'var(--text-primary)';
+  } else {
+    currentFilterMode = 'bookmarks';
+    btn.style.borderColor = 'var(--accent-color)';
+    btn.style.color = 'var(--accent-color)';
+  }
+  renderTweets();
+}
+
+window.toggleBookmark = function(id) {
+  if (bookmarks.includes(id)) {
+    bookmarks = bookmarks.filter(bId => bId !== id);
+  } else {
+    bookmarks.push(id);
+  }
+  saveLocalSettings();
+  renderTweets();
+}
+
+async function updateTweetInFirestore(tweet) {
+  await db.collection('tweets').doc(String(tweet.id)).set(tweet);
+}
+
+// --- 投稿削除機能 ---
+window.deleteTweet = async function(tweetId) {
+  if (confirm("この投稿を削除しますか？")) {
+    try {
+      await db.collection('tweets').doc(String(tweetId)).delete();
+    } catch (err) {
+      console.error("削除エラー: ", err);
+      alert("削除に失敗しました。");
+    }
+  }
+}
+
+window.toggleReaction = async function(tweetId, stampKey) {
+  const tweet = tweets.find(t => t.id === tweetId);
+  if (!tweet) return;
+
+  if (!tweet.reactions) {
+    tweet.reactions = { thanks: 0, peace: 0, celebrate: 0, healing: 0 };
+  }
+
+  if (tweet.userReaction === stampKey) {
+    tweet.reactions[stampKey] = Math.max(0, (tweet.reactions[stampKey] || 1) - 1);
+    tweet.userReaction = null;
+  } else {
+    if (tweet.userReaction) {
+      tweet.reactions[tweet.userReaction] = Math.max(0, (tweet.reactions[tweet.userReaction] || 1) - 1);
+    }
+    tweet.reactions[stampKey] = (tweet.reactions[stampKey] || 0) + 1;
+    tweet.userReaction = stampKey;
+  }
+
+  await updateTweetInFirestore(tweet);
+}
+
+window.requestFriend = function(userName) {
+  if (userName === userProfile.name) {
+    alert("自分自身にフレンド申請は送れません。");
+    return;
+  }
+  if (friends.includes(userName)) {
+    alert(`${userName} さんとは既にフレンドです。`);
+    return;
+  }
+  if (pendingRequestsOut.includes(userName)) {
+    alert(`${userName} さんには既に申請済みです。`);
+    return;
+  }
+
+  pendingRequestsOut.push(userName);
+  saveLocalSettings();
+  alert(`${userName} さんにフレンド申請を送信しました！`);
+  renderTweets();
+}
+
+window.acceptFriend = function(userName) {
+  if (!friends.includes(userName)) {
+    friends.push(userName);
+    if (!dms[userName]) dms[userName] = [];
+  }
+  pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
+  pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
+  
+  saveLocalSettings();
+  addNotification(`${userName} さんとフレンドになりました！🤝`);
+  alert(`${userName} さんのフレンド申請を承認しました！`);
+  openDmListModal();
+  renderTweets();
+}
+
+window.rejectFriend = function(userName) {
+  pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
+  saveLocalSettings();
+  openDmListModal();
+  renderTweets();
+}
+
+window.removeFriend = function(userName) {
+  if (confirm(`${userName} さんをフレンドから削除しますか？`)) {
+    friends = friends.filter(f => f !== userName);
+    saveLocalSettings();
+    openDmListModal();
+    renderTweets();
+  }
+}
+
+window.unblockUser = function(userName) {
+  blockedUsers = blockedUsers.filter(b => b !== userName);
+  saveLocalSettings();
+  alert(`${userName} さんのブロックを解除しました。`);
+  openDmListModal();
+  renderTweets();
+}
+
+window.openDmListModal = function() {
+  let dmModal = document.getElementById('dmListModal');
+  if (!dmModal) {
+    dmModal = document.createElement('div');
+    dmModal.id = 'dmListModal';
+    dmModal.className = 'modal-overlay';
+    document.body.appendChild(dmModal);
+  }
+  dmModal.style.display = 'flex';
+  
+  dmModal.innerHTML = `
+    <div class="modal-content" style="max-height: 80vh; overflow-y: auto;">
+      <div class="modal-title">
+        <span>フレンド＆メッセージ 💬</span>
+        <button onclick="closeModal('dmListModal')" style="background:none; border:none; color:white; cursor:pointer;">✕</button>
+      </div>
+
+      ${pendingRequestsIn.length > 0 ? `
+        <div style="margin-bottom: 20px; background: rgba(29, 155, 240, 0.1); border: 1px solid var(--accent-color); padding: 12px; border-radius: 12px;">
+          <div style="font-weight: bold; font-size: 0.9rem; color: var(--accent-color); margin-bottom: 8px;">📩 届いているフレンド申請 (${pendingRequestsIn.length})</div>${pendingRequestsIn.map(r => `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span style="font-size:0.85rem; font-weight:bold;">👤 ${escapeHtml(r.from)}</span>
+              <div style="display:flex; gap:6px;">
+                <button onclick="acceptFriend('${escapeHtml(r.from)}')" style="background: #00b900; border:none; color:white; font-size:0.75rem; padding:4px 10px; border-radius:9999px; cursor:pointer; font-weight:bold;">承認</button>
+                <button onclick="rejectFriend('${escapeHtml(r.from)}')" style="background:transparent; border:1px solid var(--text-secondary); color:var(--text-secondary); font-size:0.75rem; padding:4px 8px; border-radius:9999px; cursor:pointer;">拒否</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      ` : ''}
+
+      <div style="margin-bottom: 20px;">
+        <div style="font-weight: bold; font-size: 0.9rem; color: var(--accent-color); margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">💬 トークを開始</div>
+        ${friends.length === 0 ? '<p style="color:var(--text-secondary); font-size:0.85rem; padding:6px 0;">トークできるフレンドがいません。</p>' : ''}
+        ${friends.map(f => `
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 12px; margin-bottom: 6px; cursor: pointer;" onclick="openChat('${f}')">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:1.1rem;">👤</span>
+              <div>
+                <span style="font-weight:bold; font-size:0.9rem;">${escapeHtml(f)}</span>
+                <span style="font-size:0.7rem; color:var(--text-secondary); margin-left:8px;">🌍 現地時間: <span class="peer-world-time" data-lang="en">${window.getPeerCurrentTime ? window.getPeerCurrentTime('en') : '12:00'}</span></span>
+              </div>
+            </div>
+            <span style="font-size: 0.8rem; color: var(--accent-color);">トークを開く ➔</span>
+          </div>
+        `).join('')}
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <div style="font-weight: bold; font-size: 0.9rem; color: #00b900; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">👥 フレンド一覧 (${friends.length})</div>
+        ${friends.length === 0 ? '<p style="color:var(--text-secondary); font-size:0.85rem; padding:6px 0;">フレンドがいません。</p>' : ''}
+        ${friends.map(f => `
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: rgba(255,255,255,0.02); border-radius: 8px; margin-bottom: 6px;">
+            <span style="font-size:0.85rem;">👤 ${escapeHtml(f)}</span>
+            <button onclick="removeFriend('${escapeHtml(f)}')" style="background:none; border:1px solid #ff4949; color:#ff4949; font-size:0.75rem; padding:2px 8px; border-radius:9999px; cursor:pointer;">削除</button>
+          </div>
+        `).join('')}
+      </div>
+
+      <div>
+        <div style="font-weight: bold; font-size: 0.9rem; color: var(--pink-color); margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">🚫 ブロック一覧 (${blockedUsers.length})</div>
+        ${blockedUsers.length === 0 ? '<p style="color:var(--text-secondary); font-size:0.85rem; padding:6px 0;">ブロックしているユーザーはいません。</p>' : ''}
+        ${blockedUsers.map(b => `
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: rgba(255,255,255,0.02); border-radius: 8px; margin-bottom: 6px;">
+            <span style="font-size:0.85rem;">🚫 ${escapeHtml(b)}</span>
+            <button onclick="unblockUser('${escapeHtml(b)}')" style="background:none; border:1px solid var(--text-secondary); color:var(--text-primary); font-size:0.75rem; padding:2px 8px; border-radius:9999px; cursor:pointer;">解除</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+window.openChat = function(friendName) {
+  closeModal('dmListModal');
+  currentChatFriend = friendName;
+  if (!dms[friendName]) dms[friendName] = [];
+
+  let chatModal = document.getElementById('chatModal');
+  if (!chatModal) {
+    chatModal = document.createElement('div');
+    chatModal.id = 'chatModal';
+    chatModal.className = 'modal-overlay';
+    document.body.appendChild(chatModal);
+  }
+  chatModal.style.display = 'flex';
+  renderChatContent();
+}
+
+function renderChatContent() {
+  const chatModal = document.getElementById('chatModal');
+  const messages = dms[currentChatFriend] || [];
+
+  chatModal.innerHTML = `
+    <div class="modal-content" style="display: flex; flex-direction: column; height: 75vh; width: 95%; max-width: 450px; padding: 16px; background: var(--card-bg);">
+      <div class="modal-title" style="padding-bottom: 12px; border-bottom: 1px solid var(--border-color); margin-bottom: 0;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>👤</span>
+          <span>${escapeHtml(currentChatFriend)}</span>
+        </div>
+        <button onclick="closeModal('chatModal')" style="background:none; border:none; color:var(--text-primary); cursor:pointer; font-size: 1.1rem;">✕</button>
+      </div>
+
+      <div id="chatMessages" style="flex: 1; overflow-y: auto; background: var(--bg-color); padding: 12px; border-radius: 12px; margin: 12px 0; display: flex; flex-direction: column; gap: 12px; border: 1px solid var(--border-color);">
+        ${messages.length === 0 ? '<div style="text-align:center; color:var(--text-secondary); margin:auto; font-size:0.85rem;">メッセージを送ってトークを開始しましょう！</div>' : ''}
+        ${messages.map(m => {
+          const isMe = m.sender === userProfile.name;
+          return `
+            <div style="display: flex; flex-direction: column; align-items: ${isMe ? 'flex-end' : 'flex-start'};">
+              <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 2px;">${isMe ? '' : m.sender}</div>
+              <div style="display: flex; align-items: flex-end; gap: 6px; flex-direction: ${isMe ? 'row-reverse' : 'row'}; max-width: 85%;">
+                <div style="background: ${isMe ? '#00b900' : '#2f3336'}; color: white; padding: 8px 14px; border-radius: ${isMe ? '16px 16px 2px 16px' : '16px 16px 16px 2px'}; font-size: 0.9rem; line-height: 1.4; word-break: break-word;">
+                  ${escapeHtml(m.text)}
+                </div>
+                <span style="font-size: 0.65rem; color: var(--text-secondary); white-space: nowrap;">${m.time}</span>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+
+      <form onsubmit="sendDmMessage(event)" style="display: flex; gap: 8px;">
+        <input type="text" id="dmInput" class="form-input" placeholder="メッセージを入力..." required style="margin:0; border-radius: 9999px; padding: 10px 16px;">
+        <button type="submit" class="post-submit-btn" style="background: #00b900; padding: 0 18px;">送信</button>
+      </form>
+    </div>
+  `;
+  const msgBox = document.getElementById('chatMessages');
+  msgBox.scrollTop = msgBox.scrollHeight;
+}
+
+window.sendDmMessage = function(e) {
+  e.preventDefault();
+  const input = document.getElementById('dmInput');
+  const text = input.value.trim();
+  if (!text || !currentChatFriend) return;
+
+  const timeStr = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  dms[currentChatFriend].push({ sender: userProfile.name, text, time: timeStr });
+  saveLocalSettings();
+  input.value = '';
+  renderChatContent();
+  playNotificationSound();
+}
+
+window.blockUser = function(userName) {
+  if (confirm(`${userName} さんをブロックしますか？ ブロックした相手の投稿は非表示になります。`)) {
+    if (!blockedUsers.includes(userName)) {
+      blockedUsers.push(userName);
+    }
+    friends = friends.filter(f => f !== userName);
+    pendingRequestsOut = pendingRequestsOut.filter(u => u !== userName);
+    pendingRequestsIn = pendingRequestsIn.filter(r => r.from !== userName);
+    
+    saveLocalSettings();
+    renderTweets();
+    alert(`${userName} さんをブロックしました。`);
+  }
+}
+
+window.onSearchInput = function(val) {
+  searchQuery = val.trim().toLowerCase();
+  clearSearchBtn.style.display = searchQuery ? 'block' : 'none';
+  renderTweets();
+}
+
+window.clearSearch = function() {
+  searchQuery = '';
+  searchInput.value = '';
+  clearSearchBtn.style.display = 'none';
+  renderTweets();
+}
+
+window.searchTag = function(tag) {
+  searchInput.value = tag;
+  window.onSearchInput(tag);
+}
+
+document.getElementById('profileForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  userProfile.name = inputName.value;
+  userProfile.lang = inputLang.value;
+  if (inputAvatarUrl.value) userProfile.avatar = inputAvatarUrl.value;
+
+  const file = inputAvatarFile.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      userProfile.avatar = event.target.result;
+      saveLocalSettings();
+      updateProfileUI();
+      if (typeof window.applyUI18n === 'function') {
+        window.applyUI18n(userProfile.lang);
+      }
+      profileModal.style.display = 'none';
+      renderTweets();
+    };
+    reader.readAsDataURL(file);
+  } else {
+    saveLocalSettings();
+    updateProfileUI();
+    if (typeof window.applyUI18n === 'function') {
+      window.applyUI18n(userProfile.lang);
+    }
+    profileModal.style.display = 'none';
+    renderTweets();
+  }
+});
+
+window.translateTweet = async function(tweetId) {
+  const tweet = tweets.find(t => t.id === tweetId);
+  if (!tweet) return;
+
+  if (tweet.translatedText) {
+    tweet.translatedText = null;
+    renderTweets();
+    return;
+  }
+
+  const text = tweet.text;
+  try {
+    const srcLang = tweet.lang || 'en';
+    const targetLang = userProfile.lang || 'ja';
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${srcLang}|${targetLang}`;
+    
+    const res = await fetch(url);
+    const data = await res.json();
+    
+    if (data && data.responseData && data.responseData.translatedText) {
+      tweet.translatedText = data.responseData.translatedText;
+    } else {
+      tweet.translatedText = '（翻訳結果を取得できませんでした）';
+    }
+  } catch (err) {
+    tweet.translatedText = '（翻訳通信エラーが発生しました）';
+  }
+  renderTweets();
+}
+
+const imageInput = document.getElementById('imageInput');
+const imagePreviewContainer = document.getElementById('imagePreviewContainer');
+const imagePreview = document.getElementById('imagePreview');
+const removeImageBtn = document.getElementById('removeImageBtn');
+
+imageInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      currentImageBase64 = event.target.result;
+      imagePreview.src = currentImageBase64;
+      imagePreviewContainer.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  }
+});
+
+removeImageBtn.addEventListener('click', () => {
+  currentImageBase64 = '';
+  imageInput.value = '';
+  imagePreviewContainer.style.display = 'none';
+});
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function formatTweetText(text) {
+  const escaped = escapeHtml(text);
+  return escaped.replace(/(#[^\s#]+)/g, (match) => {
+    return `<span class="hashtag-link" onclick="searchTag('${match}')">${match}</span>`;
+  });
+}
+
+function renderTweets() {
+  const tweetList = document.getElementById('tweetList');
+  if (!tweetList) return;
+  tweetList.innerHTML = '';
+
+  const filteredTweets = tweets.filter(t => {
+    if (blockedUsers.includes(t.name)) return false;
+    if (currentFilterMode === 'bookmarks' && !bookmarks.includes(t.id)) return false;
+    if (!searchQuery) return true;
+    const fullText = (t.name + ' ' + t.text).toLowerCase();
+    return fullText.includes(searchQuery);
+  });
+
+  if (filteredTweets.length === 0) {
+    const msg = currentFilterMode === 'bookmarks' ? 'ブックマークした投稿はありません 🔖' : '該当する投稿はありません';
+    tweetList.innerHTML = `<p style="color: var(--text-secondary); text-align: center; padding: 40px;">${msg}</p>`;
+    return;
+  }
+
+  filteredTweets.forEach(tweet => {
+    const isFriend = friends.includes(tweet.name);
+    const isPendingOut = pendingRequestsOut.includes(tweet.name);
+    const isBookmarked = bookmarks.includes(tweet.id);
+    const isMyTweet = tweet.name === userProfile.name;
+    const r = tweet.reactions || { thanks: 0, peace: 0, celebrate: 0, healing: 0 };
+    
+    const peerTime = typeof window.getPeerCurrentTime === 'function' 
+      ? window.getPeerCurrentTime(tweet.lang || 'en') 
+      : (tweet.time || '');
+
+    // 条件分岐を変数として安全に組み立てる
+    let friendActionHtml = '';
+    if (!isMyTweet) {
+      if (isFriend) {
+        friendActionHtml = `<span style="font-size: 0.75rem; color: #00b900; font-weight:bold;">✔ フレンド</span>`;
+      } else if (isPendingOut) {
+        friendActionHtml = `<span style="font-size: 0.75rem; color: var(--text-secondary); background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 9999px;">⏳ 申請中</span>`;
+      } else {
+        friendActionHtml = `<button onclick="requestFriend('${escapeHtml(tweet.name)}')" style="background: rgba(29, 155, 240, 0.15); border: 1px solid var(--accent-color); color: var(--accent-color); font-size: 0.75rem; padding: 2px 8px; border-radius: 9999px; cursor: pointer;">✉️ 申請</button>`;
+      }
+    }
+
+    let deleteBtnHtml = isMyTweet 
+      ? `<button onclick="deleteTweet(${tweet.id})" style="background:none; border:1px solid #ff4949; color:#ff4949; font-size:0.7rem; padding:2px 8px; border-radius:9999px; cursor:pointer;" title="削除">🗑️ 削除</button>` 
+      : '';
+
+    let blockBtnHtml = !isMyTweet 
+      ? `<button onclick="blockUser('${escapeHtml(tweet.name)}')" style="background:none; border:none; color:var(--text-secondary); font-size:0.75rem; cursor:pointer;" title="ブロック">🚫</button>` 
+      : '';
+
+    const card = document.createElement('article');
+    card.className = 'tweet-card';
+    card.innerHTML = `
+      <img class="user-avatar" src="${tweet.avatar || 'https://via.placeholder.com/40'}" alt="Avatar">
+      <div class="tweet-content">
+        <div class="tweet-header">
+          <span class="tweet-author">${escapeHtml(tweet.name)}</span>
+          <span class="tweet-meta">
+            ${tweet.flag || '🌐'} 
+            <span class="peer-world-time" data-lang="${tweet.lang || 'en'}">${peerTime}</span>
+          </span>
+          
+          <div style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+            ${friendActionHtml}
+            ${deleteBtnHtml}
+            <button onclick="toggleBookmark(${tweet.id})" style="background:none; border:none; color:${isBookmarked ? 'var(--accent-color)' : 'var(--text-secondary)'}; font-size:0.9rem; cursor:pointer;" title="ブックマーク">
+              ${isBookmarked ? '🔖' : '🏷️'}
+            </button>
+            ${blockBtnHtml}
+          </div>
+        </div>
+        <div class="tweet-text">${formatTweetText(tweet.text)}</div>
+        
+        ${tweet.lang && tweet.lang !== userProfile.lang ? `
+          <button class="translate-link" onclick="translateTweet(${tweet.id})">
+            🌐 ${tweet.translatedText ? '元のテキストを表示' : '翻訳を表示 (無料/無制限)'}
+          </button>
+        ` : ''}
+
+        ${tweet.translatedText ? `
+          <div class="translated-box">
+            <strong>翻訳 (${userProfile.lang.toUpperCase()}):</strong><br>${formatTweetText(tweet.translatedText)}
+          </div>
+        ` : ''}
+
+        ${tweet.imageUrl ? `<img src="${tweet.imageUrl}" class="tweet-image" alt="添付画像">` : ''}
+        
+        <div style="display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap;">
+          <button onclick="toggleReaction(${tweet.id}, 'thanks')" style="background: ${tweet.userReaction === 'thanks' ? 'rgba(249, 24, 128, 0.2)' : 'rgba(255,255,255,0.04)'}; border: 1px solid ${tweet.userReaction === 'thanks' ? 'var(--pink-color)' : 'var(--border-color)'}; color: var(--text-primary); font-size: 0.75rem; padding: 3px 8px; border-radius: 9999px; cursor: pointer;">
+            🌸 感謝 ${r.thanks ? r.thanks : ''}
+          </button>
+          <button onclick="toggleReaction(${tweet.id}, 'peace')" style="background: ${tweet.userReaction === 'peace' ? 'rgba(29, 155, 240, 0.2)' : 'rgba(255,255,255,0.04)'}; border: 1px solid ${tweet.userReaction === 'peace' ? 'var(--accent-color)' : 'var(--border-color)'}; color: var(--text-primary); font-size: 0.75rem; padding: 3px 8px; border-radius: 9999px; cursor: pointer;">
+            🕊️ 平和 ${r.peace ? r.peace : ''}
+          </button>
+          <button onclick="toggleReaction(${tweet.id}, 'celebrate')" style="background: ${tweet.userReaction === 'celebrate' ? 'rgba(255, 215, 0, 0.2)' : 'rgba(255,255,255,0.04)'}; border: 1px solid ${tweet.userReaction === 'celebrate' ? '#ffd700' : 'var(--border-color)'}; color: var(--text-primary); font-size: 0.75rem; padding: 3px 8px; border-radius: 9999px; cursor: pointer;">
+            🎉 お祝い ${r.celebrate ? r.celebrate : ''}
+          </button>
+          <button onclick="toggleReaction(${tweet.id}, 'healing')" style="background: ${tweet.userReaction === 'healing' ? 'rgba(0, 185, 0, 0.2)' : 'rgba(255,255,255,0.04)'}; border: 1px solid ${tweet.userReaction === 'healing' ? '#00b900' : 'var(--border-color)'}; color: var(--text-primary); font-size: 0.75rem; padding: 3px 8px; border-radius: 9999px; cursor: pointer;">
+            ☕ 癒やし ${r.healing ? r.healing : ''}
+          </button>
+        </div>
+
+        <div class="tweet-footer">
+          <button class="tweet-action" onclick="toggleReply(${tweet.id})">
+            <i data-lucide="message-circle" style="width: 16px;"></i>
+            <span>${tweet.replies ? tweet.replies.length : 0}</span>
+          </button>
+          <button class="tweet-action ${tweet.isLiked ? 'liked' : ''}" onclick="toggleLike(${tweet.id})">
+            <i data-lucide="heart" style="width: 16px; ${tweet.isLiked ? 'fill: var(--pink-color);' : ''}"></i>
+            <span>${tweet.likes}</span>
+          </button>
+        </div>
+
+        <div id="replies-${tweet.id}" class="replies-container">
+          <div id="reply-list-${tweet.id}">
+            ${(tweet.replies || []).map(r => `
+              <div class="reply-item">
+                <strong>${escapeHtml(r.name)}:</strong>
+                <span>${formatTweetText(r.text)}</span>
+              </div>
+            `).join('')}
+          </div>
+          <form class="reply-form" onsubmit="addReply(event, ${tweet.id})">
+            <input type="text" class="reply-input" placeholder="返信する..." required>
+            <button type="submit" class="reply-btn">返信</button>
+          </form>
+        </div>
+      </div>
+    `;
+    tweetList.appendChild(card);
+  });
+
+  if (typeof lucide !== 'undefined') {
+    lucide.createIcons();
+  }
+}
+
+function addNotification(text) {
+  notifications.unshift({ text, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
+  notifBadge.style.display = 'inline-block';
+  notifBadge.textContent = notifications.length;
+  playNotificationSound();
+}
+
+window.clearNotifications = function() {
+  notifications = [];
+  notifBadge.style.display = 'none';
+  notifBadge.textContent = '0';
+  renderNotifications();
+}
+
+function renderNotifications() {
+  const list = document.getElementById('notificationList');
+  if (!list) return;
+  if (notifications.length === 0) {
+    list.innerHTML = `<p style="color: var(--text-secondary); text-align: center; padding: 20px;">通知はありません</p>`;
+    return;
+  }
+  
+  let html = `
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+      <button onclick="clearNotifications()" style="background: none; border: 1px solid var(--border-color); color: var(--text-secondary); font-size: 0.75rem; padding: 4px 10px; border-radius: 9999px; cursor: pointer;">通知をクリア</button>
+    </div>
+  `;
+
+  html += notifications.map(n => `
+    <div class="notification-item">
+      <span>🔔</span>
+      <div style="flex: 1;">
+        <div>${escapeHtml(n.text)}</div>
+        <div style="font-size: 0.75rem; color: var(--text-secondary);">${n.time}</div>
+      </div>
+    </div>
+  `).join('');
+
+  list.innerHTML = html;
+}
+
+window.toggleLike = async function(id) {
+  const tweet = tweets.find(t => t.id === id);
+  if (tweet) {
+    tweet.isLiked = !tweet.isLiked;
+    tweet.likes += tweet.isLiked ? 1 : -1;
+    if (tweet.isLiked && tweet.name !== userProfile.name) {
+      addNotification(`${userProfile.name} さんがあなたの投稿にいいねしました ❤️`);
+    }
+    await updateTweetInFirestore(tweet);
+  }
+}
+
+window.toggleReply = function(id) {
+  const el = document.getElementById(`replies-${id}`);
+  if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
+}
+
+window.addReply = async function(e, id) {
+  e.preventDefault();
+  const input = e.target.querySelector('.reply-input');
+  const text = input.value;
+  const tweet = tweets.find(t => t.id === id);
+  if (tweet && text) {
+    if (!tweet.replies) tweet.replies = [];
+    tweet.replies.push({ name: userProfile.name, text });
+    if (tweet.name !== userProfile.name) {
+      addNotification(`${userProfile.name} さんがあなたの投稿に返信しました: "${text}"`);
+    }
+    input.value = '';
+    await updateTweetInFirestore(tweet);
+    const replyContainer = document.getElementById(`replies-${id}`);
+    if (replyContainer) replyContainer.style.display = 'block';
+  }
+}
+
+const tweetForm = document.getElementById('tweetForm');
+if (tweetForm) {
+  tweetForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const tweetText = document.getElementById('tweetText');
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+    const newTweet = {
+      id: Date.now(),
+      name: userProfile.name,
+      avatar: userProfile.avatar,
+      text: tweetText.value,
+      lang: userProfile.lang,
+      flag: userProfile.flag,
+      time: timeStr,
+      imageUrl: currentImageBase64,
+      likes: 0,
+      isLiked: false,
+      reactions: { thanks: 0, peace: 0, celebrate: 0, healing: 0 },
+      userReaction: null,
+      translatedText: null,
+      replies: []
+    };
+
+    try {
+      await db.collection('tweets').doc(String(newTweet.id)).set(newTweet);
+      tweetText.value = '';
+      currentImageBase64 = '';
+      if (imageInput) imageInput.value = '';
+      if (imagePreviewContainer) imagePreviewContainer.style.display = 'none';
+
+      if (typeof confetti === 'function') {
+        confetti({
+          particleCount: 60,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
+      }
+    } catch (err) {
+      console.error("投稿エラー: ", err);
+      alert("投稿に失敗しました。");
+    }
+  });
+}
+
+checkInitialSetup();
+
+if (typeof window.applyUI18n === 'function') {
+  window.applyUI18n(userProfile.lang);
+}
