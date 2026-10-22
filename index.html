@@ -56,7 +56,7 @@
       position: relative;
     }
 
-    /* 左サイドバー（スライドメニュー対応） */
+    /* 左サイドバー（デフォルトはPC用固定） */
     .sidebar-left {
       width: 275px;
       padding: 20px;
@@ -68,8 +68,8 @@
       position: sticky;
       top: 0;
       background: var(--bg-color);
-      transition: transform 0.3s ease;
       z-index: 50;
+      transition: transform 0.3s ease;
     }
 
     .brand-logo {
@@ -143,7 +143,7 @@
       z-index: 10;
     }
 
-    /* モバイル用メニュー開閉ボタン */
+    /* スマホ用メニュー開閉ボタン */
     .menu-open-btn {
       background: none;
       border: 1px solid var(--border-color);
@@ -519,7 +519,7 @@
             <span>🕊️</span>
             <span>平和</span>
           </div>
-          <button onclick="toggleSideMenu()" style="background:none; border:none; color:var(--text-primary); font-size:1.2rem; cursor:pointer; display:none;" id="sidebarCloseBtn">✕</button>
+          <button onclick="toggleSideMenu()" style="background:none; border:none; color:var(--text-primary); font-size:1.2rem; cursor:pointer;" id="sidebarCloseBtn">✕</button>
         </div>
         <button onclick="openNotificationsModal()" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; margin-bottom: 12px;">
           🔔 通知
