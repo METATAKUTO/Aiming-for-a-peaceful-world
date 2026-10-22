@@ -53,9 +53,10 @@
       display: flex;
       width: 100%;
       max-width: 1200px;
+      position: relative;
     }
 
-    /* 左サイドバー */
+    /* 左サイドバー（スライドメニュー対応） */
     .sidebar-left {
       width: 275px;
       padding: 20px;
@@ -66,6 +67,9 @@
       height: 100vh;
       position: sticky;
       top: 0;
+      background: var(--bg-color);
+      transition: transform 0.3s ease;
+      z-index: 50;
     }
 
     .brand-logo {
@@ -75,7 +79,7 @@
       margin-bottom: 20px;
       display: flex;
       align-items: center;
-      gap: 8px;
+      justify-content: space-between;
     }
 
     .user-profile-card {
@@ -130,13 +134,39 @@
       font-weight: bold;
       border-bottom: 1px solid var(--border-color);
       display: flex;
-      justify-content: space-between;
       align-items: center;
+      gap: 12px;
       position: sticky;
       top: 0;
       background: var(--bg-color);
       backdrop-filter: blur(10px);
       z-index: 10;
+    }
+
+    /* モバイル用メニュー開閉ボタン */
+    .menu-open-btn {
+      background: none;
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 6px 12px;
+      border-radius: 9999px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: bold;
+      display: none;
+    }
+
+    /* メニュー背景の暗幕（スマホ用） */
+    .menu-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(2px);
+      display: none;
+      z-index: 40;
     }
 
     /* 投稿フォーム */
@@ -461,22 +491,37 @@
       .sidebar-right { display: none; }
     }
     @media (max-width: 768px) {
-      .sidebar-left { width: 70px; padding: 10px 6px; align-items: center; }
-      .sidebar-left .brand-logo span:nth-child(2), .user-info { display: none; }
+      .menu-open-btn { display: inline-block; }
+      .sidebar-left {
+        position: fixed;
+        left: 0;
+        top: 0;
+        transform: translateX(-100%);
+        box-shadow: 4px 0 20px rgba(0,0,0,0.5);
+      }
+      .sidebar-left.open {
+        transform: translateX(0);
+      }
     }
   </style>
 </head>
 <body>
 
   <div class="app-container">
-    <!-- 左サイドバー -->
-    <aside class="sidebar-left">
+    <!-- スマホ用メニュー背景暗幕 -->
+    <div id="menuBackdrop" class="menu-backdrop" onclick="toggleSideMenu()"></div>
+
+    <!-- 左サイドバー（スライドメニュー） -->
+    <aside id="sidebarLeft" class="sidebar-left">
       <div>
         <div class="brand-logo">
-          <span>🕊️</span>
-          <span>平和</span>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span>🕊️</span>
+            <span>平和</span>
+          </div>
+          <button onclick="toggleSideMenu()" style="background:none; border:none; color:var(--text-primary); font-size:1.2rem; cursor:pointer; display:none;" id="sidebarCloseBtn">✕</button>
         </div>
-        <button onclick="openNotificationsModal()" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px; position: relative;">
+        <button onclick="openNotificationsModal()" style="background: transparent; border: 1px solid var(--border-color); color: var(--text-primary); width: 100%; padding: 10px; border-radius: 9999px; cursor: pointer; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 8px; position: relative; margin-bottom: 12px;">
           🔔 通知
           <span id="notifBadge" style="position: absolute; top: 6px; right: 12px; background: var(--pink-color); color: white; border-radius: 50%; padding: 2px 6px; font-size: 0.65rem; display: none;">0</span>
         </button>
@@ -494,6 +539,7 @@
     <!-- メインタイムライン -->
     <main class="main-timeline">
       <header class="timeline-header">
+        <button class="menu-open-btn" onclick="toggleSideMenu()">≡ メニュー</button>
         <span>ホーム</span>
       </header>
 
