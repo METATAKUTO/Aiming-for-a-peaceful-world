@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - リアルタイムフレンド申請＆スライドメニュー対応版
+// 平和 (Peaceful Board) - メニュー開閉・フレンド申請同期対応版
 // ==========================================
 
 // Firebase 初期化
@@ -75,9 +75,8 @@ function saveLocalSettings() {
   }
 }
 
-// --- Firestore リアルタイムリスナー（ツイート・ユーザー名・フレンド申請同期） ---
+// --- Firestore リアルタイムリスナー ---
 function initRealtimeSync() {
-  // ツイート同期
   db.collection('tweets').orderBy('id', 'desc').onSnapshot((snapshot) => {
     tweets = [];
     snapshot.forEach((doc) => {
@@ -88,7 +87,6 @@ function initRealtimeSync() {
     console.error("Firestoreツイート同期エラー: ", error);
   });
 
-  // ユーザー名同期
   db.collection('users').onSnapshot((snapshot) => {
     registeredUsers = {};
     snapshot.forEach((doc) => {
@@ -96,7 +94,6 @@ function initRealtimeSync() {
     });
   });
 
-  // フレンド申請のリアルタイム同期（自分の名前に届いた申請を監視）
   if (userProfile.name) {
     db.collection('friendRequests').where('to', '==', userProfile.name).onSnapshot((snapshot) => {
       pendingRequestsIn = [];
@@ -208,7 +205,7 @@ function playNotificationSound() {
   }
 }
 
-// --- メニューのパーツ＆スライドメニュー開閉制御 ---
+// --- メニュー構成の注入（ブランド注意書きと各機能ボタン） ---
 function injectBrandNotice() {
   const brandLogo = document.querySelector('.brand-logo');
   if (brandLogo && !document.getElementById('brandNotice')) {
@@ -244,30 +241,25 @@ function injectBrandNotice() {
     `;
     sidebar.appendChild(container);
   }
-
-  const closeBtn = document.getElementById('sidebarCloseBtn');
-  if (closeBtn && window.innerWidth <= 768) {
-    closeBtn.style.display = 'block';
-  }
 }
 
-let isMenuOpen = false;
+// --- スマホ用スライドメニューの開閉関数 ---
 window.toggleSideMenu = function() {
   const sidebar = document.getElementById('sidebarLeft');
   const backdrop = document.getElementById('menuBackdrop');
   if (!sidebar || !backdrop) return;
 
-  isMenuOpen = !isMenuOpen;
-  if (isMenuOpen) {
-    sidebar.classList.add('open');
-    backdrop.style.display = 'block';
-  } else {
+  const isOpen = sidebar.classList.contains('open');
+  if (isOpen) {
     sidebar.classList.remove('open');
     backdrop.style.display = 'none';
+  } else {
+    sidebar.classList.add('open');
+    backdrop.style.display = 'block';
   }
 }
 
-// --- 注意・利用規約モーダル ---
+// --- 利用規約モーダル ---
 window.openTermsModal = function() {
   let termsModal = document.getElementById('termsModal');
   if (!termsModal) {
@@ -305,7 +297,7 @@ function updateProfileUI() {
   userProfile.flag = langFlags[userProfile.lang] || '🌐';
   
   const langNames = { ja: '日本語', en: '英語', ko: '韓国語', zh: '中国語', es: 'スペイン語', fr: 'フランス語', de: 'ドイツ語' };
-  sideLang.textContent = `${userProfile.flag}${langNames[userProfile.lang] || userProfile.lang}`;
+  sideLang.textContent = `${userProfile.flag} ${langNames[userProfile.lang] || userProfile.lang}`;
   injectBrandNotice();
 
   if (typeof window.applyUI18n === 'function') {
@@ -423,14 +415,13 @@ window.toggleReaction = async function(tweetId, stampKey) {
   await updateTweetInFirestore(tweet);
 }
 
-// --- フレンド申請（Firestoreクラウド送信対応） ---
 window.requestFriend = async function(userName) {
   if (userName === userProfile.name) {
     alert("自分自身にフレンド申請は送れません。");
     return;
   }
   if (friends.includes(userName)) {
-    alert(`${userName} さんとは既にフレンドです。");
+    alert(`${userName} さんとは既にフレンドです。`);
     return;
   }
   if (pendingRequestsOut.includes(userName)) {
@@ -462,7 +453,6 @@ window.acceptFriend = async function(userName) {
     if (!dms[userName]) dms[userName] = [];
   }
   
-  // サーバー上の申請データを削除
   try {
     const requestId = userName + '_' + userProfile.name;
     await db.collection('friendRequests').doc(requestId).delete();
@@ -757,7 +747,6 @@ window.translateTweet = async function(tweetId) {
   renderTweets();
 }
 
-// --- メディア選択時の処理 ---
 const mediaInput = document.getElementById('mediaInput') || document.getElementById('imageInput');
 const imagePreviewContainer = document.getElementById('imagePreviewContainer');
 const previewWrapper = document.getElementById('previewWrapper');
