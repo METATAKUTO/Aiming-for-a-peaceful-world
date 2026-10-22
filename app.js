@@ -1,5 +1,5 @@
 // ==========================================
-// 平和 (Peaceful Board) - Firebase リアルタイム同期＆画像・GIF限定版
+// 平和 (Peaceful Board) - 名前重複防止＆デバイスID削除管理版
 // ==========================================
 
 // Firebase 初期化
@@ -15,6 +15,13 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+
+// --- 端末固有のユニークID（デバイスID）の生成・保持 ---
+let deviceId = localStorage.getItem('peace_device_id');
+if (!deviceId) {
+  deviceId = 'dev_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  localStorage.setItem('peace_device_id', deviceId);
+}
 
 // --- 状態変数 ---
 let userProfile = JSON.parse(localStorage.getItem('peace_profile')) || {
@@ -32,11 +39,12 @@ let bookmarks = JSON.parse(localStorage.getItem('peace_bookmarks')) || [];
 let dms = JSON.parse(localStorage.getItem('peace_dms')) || {};
 
 let tweets = [];
+let registeredUsers = {}; // 登録済みユーザー名のリスト（名前 -> deviceId）
 let searchQuery = '';
 let currentFilterMode = 'all'; // 'all', 'bookmarks', 'my_posts'
 let notifications = [];
 let currentChatFriend = null;
-let currentMediaBase64 = ''; // 画像またはGIFのデータ
+let currentMediaBase64 = '';
 
 const sideAvatar = document.getElementById('sideAvatar');
 const sideName = document.getElementById('sideName');
@@ -67,8 +75,9 @@ function saveLocalSettings() {
   }
 }
 
-// --- Firestore リアルタイムリスナー ---
+// --- Firestore リアルタイムリスナー（ツイート＆ユーザー名予約の同期） ---
 function initRealtimeSync() {
+  // ツイートの同期
   db.collection('tweets').orderBy('id', 'desc').onSnapshot((snapshot) => {
     tweets = [];
     snapshot.forEach((doc) => {
@@ -76,44 +85,97 @@ function initRealtimeSync() {
     });
     renderTweets();
   }, (error) => {
-    console.error("Firestore同期エラー: ", error);
+    console.error("Firestoreツイート同期エラー: ", error);
   });
+
+  // ユーザー名台帳の同期（名前の重複を防ぐため）
+  db.collection('users').onSnapshot((snapshot) => {
+    registeredUsers = {};
+    snapshot.forEach((doc) => {
+      registeredUsers[doc.id] = doc.data().deviceId;
+    });
+  }, (error) => {
+    console.error("Firestoreユーザー同期エラー: ", error);
+  });
+}
+
+// --- 名前の重複チェックと登録 ---
+async function claimUsername(name) {
+  const userDocRef = db.collection('users').doc(name);
+  try {
+    const doc = await userDocRef.get();
+    if (doc.exists) {
+      // 既にその名前が存在する場合、自分のデバイスIDと同じならOK
+      if (doc.data().deviceId === deviceId) {
+        return true;
+      }
+      return false; // 他の人が使っている
+    } else {
+      // 新規登録
+      await userDocRef.set({ deviceId: deviceId });
+      return true;
+    }
+  } catch (err) {
+    console.error("名前登録エラー:", err);
+    return false;
+  }
 }
 
 function checkInitialSetup() {
   const savedName = localStorage.getItem('peace_username');
   if (!savedName && !userProfile.name) {
-    const nameInputModal = document.createElement('div');
-    nameInputModal.className = 'modal-overlay';
-    nameInputModal.style.display = 'flex';
-    nameInputModal.style.zIndex = '999';
-    nameInputModal.innerHTML = `
-      <div class="modal-content" style="text-align: center;">
-        <div class="modal-title" style="justify-content: center;">🕊️ 平和な空間へようこそ</div>
-        <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px;">
-          最初のあなたの表示名を入力してください。
-        </p>
-        <input type="text" id="firstUserName" class="form-input" placeholder="例: 平和すき" style="margin-bottom: 16px;" required>
-        <button id="firstUserSubmit" class="modal-submit">はじめる</button>
-      </div>
-    `;
-    document.body.appendChild(nameInputModal);
-
-    document.getElementById('firstUserSubmit').addEventListener('click', () => {
-      const val = document.getElementById('firstUserName').value.trim();
-      if (val) {
-        userProfile.name = val;
-        saveLocalSettings();
-        nameInputModal.remove();
+    showNameInputModal();
+  } else {
+    if (savedName) userProfile.name = savedName;
+    // 起動時に自分の名前を再登録確認
+    claimUsername(userProfile.name).then((success) => {
+      if (!success) {
+        alert("⚠️ あなたが前回使っていた名前は、現在他の方が使用中のためリセットされました。新しい名前を設定してください。");
+        localStorage.removeItem('peace_username');
+        userProfile.name = '';
+        showNameInputModal();
+      } else {
         updateProfileUI();
         initRealtimeSync();
       }
     });
-  } else {
-    if (savedName) userProfile.name = savedName;
+  }
+}
+
+function showNameInputModal() {
+  const nameInputModal = document.createElement('div');
+  nameInputModal.id = 'nameInputModalOverlay';
+  nameInputModal.className = 'modal-overlay';
+  nameInputModal.style.display = 'flex';
+  nameInputModal.style.zIndex = '999';
+  nameInputModal.innerHTML = `
+    <div class="modal-content" style="text-align: center;">
+      <div class="modal-title" style="justify-content: center;">🕊️ 平和な空間へようこそ</div>
+      <p style="color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 16px;">
+        他の人と被らない、あなただけの表示名を入力してください。
+      </p>
+      <input type="text" id="firstUserName" class="form-input" placeholder="例: 平和すき" style="margin-bottom: 16px;" required>
+      <button id="firstUserSubmit" class="modal-submit">はじめる</button>
+    </div>
+  `;
+  document.body.appendChild(nameInputModal);
+
+  document.getElementById('firstUserSubmit').addEventListener('click', async () => {
+    const val = document.getElementById('firstUserName').value.trim();
+    if (!val) return;
+
+    const success = await claimUsername(val);
+    if (!success) {
+      alert("❌ その名前は既に他の方が使用しています。別の名前を入力してください。");
+      return;
+    }
+
+    userProfile.name = val;
+    saveLocalSettings();
+    nameInputModal.remove();
     updateProfileUI();
     initRealtimeSync();
-  }
+  });
 }
 
 function playNotificationSound() {
@@ -297,8 +359,12 @@ async function updateTweetInFirestore(tweet) {
   await db.collection('tweets').doc(String(tweet.id)).set(tweet);
 }
 
-// --- 投稿削除機能 ---
-window.deleteTweet = async function(tweetId) {
+// --- 投稿削除機能（デバイスID一致で本人確認） ---
+window.deleteTweet = async function(tweetId, tweetDeviceId) {
+  if (tweetDeviceId && tweetDeviceId !== deviceId) {
+    alert("❌ この投稿は他のユーザーの投稿であるため削除できません。");
+    return;
+  }
   if (confirm("この投稿を削除しますか？")) {
     try {
       await db.collection('tweets').doc(String(tweetId)).delete();
@@ -568,9 +634,22 @@ window.searchTag = function(tag) {
   window.onSearchInput(tag);
 }
 
-document.getElementById('profileForm').addEventListener('submit', (e) => {
+// --- プロフィール変更時の処理（名前の重複チェック付き） ---
+document.getElementById('profileForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  userProfile.name = inputName.value;
+  const newName = inputName.value.trim();
+  if (!newName) return;
+
+  // もし名前を変更する場合、重複チェック
+  if (newName !== userProfile.name) {
+    const success = await claimUsername(newName);
+    if (!success) {
+      alert("❌ その名前は既に他の方が使用しています。別の名前にしてください。");
+      return;
+    }
+  }
+
+  userProfile.name = newName;
   userProfile.lang = inputLang.value;
   if (inputAvatarUrl.value) userProfile.avatar = inputAvatarUrl.value;
 
@@ -640,14 +719,12 @@ if (mediaInput) {
     const file = e.target.files[0];
     if (!file) return;
 
-    // 動画ファイルが選択された場合は拒否する
     if (file.type.startsWith('video/')) {
       alert("⚠️ 動画のアップロードはできません。\n画像またはGIFアニメーションのみ選択してください。");
       mediaInput.value = '';
       return;
     }
 
-    // ファイルサイズチェック (画像・GIFは2MB以下を推奨)
     if (file.size > 2000000) {
       alert("⚠️ 画像（またはGIF）のファイルサイズが大きすぎます（2MB以下にしてください）。");
       mediaInput.value = '';
@@ -713,7 +790,7 @@ function renderTweets() {
     const isFriend = friends.includes(tweet.name);
     const isPendingOut = pendingRequestsOut.includes(tweet.name);
     const isBookmarked = bookmarks.includes(tweet.id);
-    const isMyTweet = tweet.name === userProfile.name;
+    const isMyTweet = (tweet.deviceId && tweet.deviceId === deviceId) || (!tweet.deviceId && tweet.name === userProfile.name);
     const r = tweet.reactions || { thanks: 0, peace: 0, celebrate: 0, healing: 0 };
     
     const peerTime = typeof window.getPeerCurrentTime === 'function' 
@@ -731,8 +808,9 @@ function renderTweets() {
       }
     }
 
+    // 自分の投稿にのみ削除ボタンを表示
     let deleteBtnHtml = isMyTweet 
-      ? `<button onclick="deleteTweet(${tweet.id})" style="background:none; border:1px solid #ff4949; color:#ff4949; font-size:0.7rem; padding:2px 8px; border-radius:9999px; cursor:pointer;" title="削除">🗑️ 削除</button>` 
+      ? `<button onclick="deleteTweet(${tweet.id}, '${tweet.deviceId || ''}')" style="background:none; border:1px solid #ff4949; color:#ff4949; font-size:0.7rem; padding:2px 8px; border-radius:9999px; cursor:pointer;" title="削除">🗑️ 削除</button>` 
       : '';
 
     let blockBtnHtml = !isMyTweet 
@@ -914,6 +992,7 @@ if (tweetForm) {
 
     const newTweet = {
       id: Date.now(),
+      deviceId: deviceId, // 投稿者のデバイスIDを埋め込むことで本人確認
       name: userProfile.name,
       avatar: userProfile.avatar,
       text: tweetText.value,
@@ -932,7 +1011,7 @@ if (tweetForm) {
     try {
       await db.collection('tweets').doc(String(newTweet.id)).set(newTweet);
       
-      // --- 投稿成功時にテキスト欄とプレビューを空にする（クリア） ---
+      // 投稿成功時に入力欄とプレビューをクリア
       tweetText.value = '';
       currentMediaBase64 = '';
       if (mediaInput) mediaInput.value = '';
